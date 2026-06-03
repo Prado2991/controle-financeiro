@@ -20,7 +20,8 @@ def conectar_planilha():
     if "google_credentials" not in st.secrets:
         st.error("""
         ❌ **Erro de Configuração:** O segredo `google_credentials` não foi encontrado no painel de Secrets do Streamlit.
-        \n*Como corrigir:* Vá em Settings -> Secrets no painel do Streamlit Cloud e cole as credenciais lá.
+        
+        Como corrigir: Vá em Settings -> Secrets no painel do Streamlit Cloud e cole as credenciais lá.
         """)
         return None
         
@@ -31,13 +32,14 @@ def conectar_planilha():
         except Exception as json_err:
             st.error(f"""
             ❌ **Erro no Formato das Credenciais (JSON Inválido):** O conteúdo dentro de `google_credentials` não é um JSON válido.
-            \n*Detalhe técnico:* {json_err}
-            \n*Como corrigir:* Verifique se você copiou todo o arquivo `.json` do Google e se ele está envolvido por três aspas simples de cada lado no Secrets:
-            \n```toml
-            \ngoogle_credentials = '''
-            \n{ ... seu json aqui ... }
-            \n'''
-            \n```
+            
+            Detalhe técnico: {json_err}
+            
+            Como corrigir: Verifique se você copiou todo o arquivo .json do Google e se ele está envolvido por três aspas simples de cada lado no Secrets:
+            
+            google_credentials = '''
+            {{ ... seu json aqui ... }}
+            '''
             """)
             return None
         
@@ -64,12 +66,17 @@ def conectar_planilha():
             email_servico = creds_json.get("client_email", "e-mail desconhecido")
             st.error(f"""
             ❌ **A Planilha não foi Compartilhada ou o ID está incorreto!**
-            \nO aplicativo não tem permissão para abrir o seu Google Sheets.
-            \n*Como corrigir:* \n1. Abra a sua planilha no seu navegador.
-            \n2. Clique no botão azul **Compartilhar** (no canto superior direito).
-            \n3. Adicione o e-mail da sua conta de serviço como **Editor**: 
-            \n`{email_servico}`
-            \n4. Salve o compartilhamento.
+            
+            O aplicativo não tem permissão para abrir o seu Google Sheets.
+            
+            Como corrigir:
+            1. Abra a sua planilha no seu navegador.
+            2. Clique no botão azul "Compartilhar" (no canto superior direito).
+            3. Adicione o e-mail da sua conta de serviço como Editor:
+            
+            {email_servico}
+            
+            4. Salve o compartilhamento.
             """)
             return None
             
@@ -80,10 +87,13 @@ def conectar_planilha():
         except Exception as sheet_err:
             abas_disponiveis = [w.title for w in plan_aberta.worksheets()]
             st.error(f"""
-            ❌ **Aba "Lancamentos" não encontrada na planilha!**
-            \nO aplicativo conseguiu conectar, mas não achou a aba com o nome exato de `Lancamentos`.
-            \n*Abas que existem na sua planilha atualmente:* {abas_disponiveis}
-            \n*Como corrigir:* Crie uma nova aba na sua planilha e nomeie-a exatamente como `Lancamentos` (sem o "ç" e sem o "til").
+            ❌ **Aba 'Lancamentos' não encontrada na planilha!**
+            
+            O aplicativo conseguiu conectar, mas não achou a aba com o nome exato de 'Lancamentos'.
+            
+            Abas que existem na sua planilha atualmente: {abas_disponiveis}
+            
+            Como corrigir: Crie uma nova aba na sua planilha e nomeie-a exatamente como 'Lancamentos' (sem o 'ç' e sem o 'til').
             """)
             return None
             
