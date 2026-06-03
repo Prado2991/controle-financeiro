@@ -33,7 +33,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# CONEXÃO COM O GOOGLE SHEETS COM DIAGNÓSTICO DETALHADO
 def conectar_planilha():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -127,7 +126,6 @@ def conectar_planilha():
 
 sheet_conn = conectar_planilha()
 
-# LÓGICA DE FATURA (FECHAMENTO DIA 07) E PARCELAMENTO
 def calcular_mes_competencia(data_compra, forma_pagamento):
     if "Cartão" not in forma_pagamento:
         return data_compra.strftime("%Y-%m")
@@ -152,7 +150,7 @@ dias_restantes = (vencimento_limite - hoje).days
 
 st.info(f"⏳ **Fechamento de Faturas:** Faltam **{dias_restantes} dias** para o fechamento dos cartões (Próximo dia 07: {vencimento_limite.strftime('%d/%m/%Y')})")
 
-tabs = st.tabs(["📲 Novo Lançamento", "📊 Dashboard & Resumos", "💳 Controle de Parcelas & Assinaturas"])
+tabs = st.tabs(["📲 Novo Lançamento", "📊 Dashboard & Resumos", "💳 Controle de Parcelas & Assinaturas", "✏️ Ajustar Lançamentos"])
 
 # TAB 1: FORMULÁRIO DE LANÇAMENTO (OTIMIZADO PARA CELULAR)
 with tabs[0]:
@@ -160,52 +158,6 @@ with tabs[0]:
     if sheet_conn is None:
         st.info("⚠️ **O formulário de envio está temporariamente desativado devido a problemas de conexão com a planilha.** \n\nPor favor, verifique a mensagem de erro detalhada acima para saber como corrigir.")
     else:
-        # ATALHOS RÁPIDOS DE LANÇAMENTO (Melhoria de usabilidade para o dia a dia na rua)
-        st.markdown("⚡ **Lançamentos Rápidos (Clique para preencher os campos comuns):**")
-        c_at1, c_at2, c_at3, c_at4 = st.columns(4)
-        
-        # Variáveis de sessão para preencher os valores padrão do form
-        if "fast_desc" not in st.session_state: st.session_state.fast_desc = ""
-        if "fast_val" not in st.session_state: st.session_state.fast_val = 0.0
-        if "fast_tipo" not in st.session_state: st.session_state.fast_tipo = "Gasto Variável"
-        if "fast_cat" not in st.session_state: st.session_state.fast_cat = "Refeição"
-        if "fast_pgto" not in st.session_state: st.session_state.fast_pgto = "Cartão Nu"
-        if "fast_resp" not in st.session_state: st.session_state.fast_resp = "Jonathan"
-
-        if c_at1.button("☕ Cafezinho / Lanche (R$ 15,00)"):
-            st.session_state.fast_desc = "Café / Lanche rápido"
-            st.session_state.fast_val = 15.00
-            st.session_state.fast_tipo = "Gasto Variável"
-            st.session_state.fast_cat = "Refeição"
-            st.session_state.fast_pgto = "Cartão Nu"
-            st.toast("Preenchido: Cafezinho!")
-
-        if c_at2.button("⛽ Abastecimento (R$ 100,00)"):
-            st.session_state.fast_desc = "Posto de Combustível"
-            st.session_state.fast_val = 100.00
-            st.session_state.fast_tipo = "Gasto Variável"
-            st.session_state.fast_cat = "Abastecimento"
-            st.session_state.fast_pgto = "Cartão BB"
-            st.toast("Preenchido: Abastecimento!")
-
-        if c_at3.button("🍔 iFood / Jantar (R$ 60,00)"):
-            st.session_state.fast_desc = "Jantar Delivery"
-            st.session_state.fast_val = 60.00
-            st.session_state.fast_tipo = "Gasto Variável"
-            st.session_state.fast_cat = "Refeição"
-            st.session_state.fast_pgto = "Cartão Nu"
-            st.toast("Preenchido: iFood/Jantar!")
-
-        if c_at4.button("🛒 Supermercado (R$ 250,00)"):
-            st.session_state.fast_desc = "Supermercado Muffato"
-            st.session_state.fast_val = 250.00
-            st.session_state.fast_tipo = "Gasto Variável"
-            st.session_state.fast_cat = "Supermercado"
-            st.session_state.fast_pgto = "Cartão Nu"
-            st.toast("Preenchido: Supermercado!")
-
-        st.write("---")
-
         with st.form("form_lancamento", clear_on_submit=True):
             col1, col2 = st.columns([1, 1])
             with col1:
@@ -213,16 +165,14 @@ with tabs[0]:
                 data = st.date_input("Data do Lançamento", date.today(), format="DD/MM/YYYY")
                 descricao = st.text_input(
                     "Descrição", 
-                    value=st.session_state.fast_desc, 
                     placeholder="Ex: Sorveteria Sávio, Roupas na Shein, Mercado Muffato"
                 )
-                valor = st.number_input("Valor (R$)", min_value=0.0, value=st.session_state.fast_val, step=0.01, format="%.2f")
+                valor = st.number_input("Valor (R$)", min_value=0.0, step=0.01, format="%.2f")
                 
                 # Seletor do Tipo de Gasto
                 tipo = st.selectbox(
                     "Tipo de Lançamento", 
-                    ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"],
-                    index=["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"].index(st.session_state.fast_tipo)
+                    ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"]
                 )
             
             with col2:
@@ -236,23 +186,16 @@ with tabs[0]:
                 else:  # Entrada
                     lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
                 
-                # Definir índice correto se vier de atalho rápido
-                idx_cat = 0
-                if st.session_state.fast_cat in lista_cats:
-                    idx_cat = lista_cats.index(st.session_state.fast_cat)
-
-                categoria = st.selectbox("Categoria", lista_cats, index=idx_cat)
+                categoria = st.selectbox("Categoria", lista_cats)
                 
                 responsavel = st.selectbox(
                     "Para Quem?", 
-                    ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"],
-                    index=["Jonathan", "Bruna", "Alice", "Casa", "Gatos"].index(st.session_state.fast_resp)
+                    ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"]
                 )
                 
                 forma_pagto = st.selectbox(
                     "Forma de Pagamento", 
-                    ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"],
-                    index=["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"].index(st.session_state.fast_pgto)
+                    ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"]
                 )
                 
                 # Bloqueador de Parcelamento para tipos inadequados
@@ -271,7 +214,6 @@ with tabs[0]:
             
             if botao_salvar:
                 if descricao and valor > 0:
-                    # Salva a data no padrão ISO YYYY-MM-DD para evitar erros no Excel/Sheets
                     novo_registro = [
                         str(data), descricao, valor, categoria, tipo, 
                         responsavel, forma_pagto, parcelado, int(num_parcelas)
@@ -280,16 +222,11 @@ with tabs[0]:
                         sheet_conn.append_row(novo_registro)
                         st.success(f"Sucesso! '{descricao}' gravado na planilha.")
                         st.balloons()
-                        
-                        # Limpa estados rápidos após envio bem-sucedido
-                        st.session_state.fast_desc = ""
-                        st.session_state.fast_val = 0.0
                     except Exception as e:
                         st.error(f"Erro ao salvar na planilha: {e}")
                 else:
                     st.error("Por favor, preencha a descrição e defina um valor válido maior que zero.")
 
-# INTERPRETAÇÃO E PROJEÇÃO DOS DADOS
 if sheet_conn is not None:
     try:
         dados_brutos = pd.DataFrame(sheet_conn.get_all_records())
@@ -315,7 +252,7 @@ if sheet_conn is not None:
             total_parc = int(row['Parcelas_Totais']) if row.get('Parcelas_Totais') else 1
             valor_total = float(str(row['Valor']).replace(',', '.')) if row.get('Valor') else 0.0
             
-            # Se for assinatura, o valor se repete mensalmente. Vamos projetar para os próximos 12 meses
+            # Projeção automática de assinaturas recorrentes por 12 meses futuros
             if tipo_lanc == "Assinatura":
                 for m in range(12):
                     dt_recorrente = dt_compra + relativedelta(months=m)
@@ -438,6 +375,147 @@ if sheet_conn is not None:
                         st.dataframe(df_assinaturas[['Descricao', 'Valor_Parcela', 'Categoria', 'Forma_Pagamento']], use_container_width=True)
                     else:
                         st.info("Nenhuma assinatura cadastrada. Registre uma com o tipo 'Assinatura' para acompanhar o impacto automático.")
+
+            # TAB 4: AJUSTAR LANÇAMENTOS (EDITAR E APAGAR DE FORMA DINÂMICA)
+            with tabs[3]:
+                st.subheader("✏️ Alterar ou Excluir Lançamentos")
+                st.markdown("Se você digitou alguma informação incorreta ou deseja excluir um registro da planilha, ajuste os campos abaixo:")
+                
+                # Monta lista de registros com o número exato da linha da planilha
+                lista_ajustavel = []
+                for idx, row in dados_brutos.iterrows():
+                    num_linha = idx + 2  # Linha 1 é o cabeçalho, então a primeira linha de dados é a 2
+                    desc = row.get('Descricao', 'Sem Descrição')
+                    val = row.get('Valor', 0.0)
+                    dt = row.get('Data', '')
+                    
+                    rotulo = f"Linha {num_linha} | {dt} | {desc} - R$ {val}"
+                    lista_ajustavel.append({"linha": num_linha, "label": rotulo, "original": row.to_dict()})
+                
+                # Mostra o mais recente primeiro na lista para facilitar no celular
+                lista_ajustavel.reverse()
+                
+                if lista_ajustavel:
+                    registro_selecionado = st.selectbox(
+                        "Selecione o Lançamento para Corrigir:",
+                        options=lista_ajustavel,
+                        format_func=lambda x: x["label"]
+                    )
+                    
+                    if registro_selecionado:
+                        orig = registro_selecionado["original"]
+                        linha_planilha = registro_selecionado["linha"]
+                        
+                        st.write("---")
+                        # Formulário de Edição Pré-preenchido
+                        with st.form("form_edicao_registro"):
+                            st.markdown(f"**Editando dados da Linha {linha_planilha}**")
+                            col_ed1, col_ed2 = st.columns(2)
+                            
+                            with col_ed1:
+                                # Parsing de data segura
+                                try:
+                                    dt_orig = datetime.strptime(str(orig.get('Data')).split()[0], "%Y-%m-%d").date()
+                                except:
+                                    try:
+                                        dt_orig = datetime.strptime(str(orig.get('Data')).split()[0], "%d/%m/%Y").date()
+                                    except:
+                                        dt_orig = date.today()
+                                
+                                ed_data = st.date_input("Data do Lançamento", dt_orig, format="DD/MM/YYYY")
+                                ed_descricao = st.text_input("Descrição", value=orig.get('Descricao', ''))
+                                
+                                try:
+                                    val_orig = float(str(orig.get('Valor', 0.0)).replace(',', '.'))
+                                except:
+                                    val_orig = 0.0
+                                ed_valor = st.number_input("Valor (R$)", min_value=0.0, value=val_orig, step=0.01, format="%.2f")
+                                
+                                tipo_orig = orig.get('Tipo', 'Gasto Variável')
+                                lista_tipos_sup = ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"]
+                                idx_tipo_orig = lista_tipos_sup.index(tipo_orig) if tipo_orig in lista_tipos_sup else 0
+                                ed_tipo = st.selectbox("Tipo de Lançamento", lista_tipos_sup, index=idx_tipo_orig)
+                                
+                            with col_ed2:
+                                # Categorias dinâmicas com base no tipo na edição
+                                if ed_tipo == "Gasto Fixo":
+                                    lista_cats_ed = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
+                                elif ed_tipo == "Gasto Variável":
+                                    lista_cats_ed = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
+                                elif ed_tipo == "Assinatura":
+                                    lista_cats_ed = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
+                                else:
+                                    lista_cats_ed = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
+                                
+                                cat_orig = orig.get('Categoria', '')
+                                idx_cat_ed = lista_cats_ed.index(cat_orig) if cat_orig in lista_cats_ed else 0
+                                ed_categoria = st.selectbox("Categoria", lista_cats_ed, index=idx_cat_ed)
+                                
+                                resp_orig = orig.get('Responsavel', 'Jonathan')
+                                lista_resp_ed = ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"]
+                                idx_resp_ed = lista_resp_ed.index(resp_orig) if resp_orig in lista_resp_ed else 0
+                                ed_responsavel = st.selectbox("Para Quem?", lista_resp_ed, index=idx_resp_ed)
+                                
+                                pgto_orig = orig.get('Forma_Pagamento', 'Cartão Nu')
+                                lista_pgto_ed = ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"]
+                                idx_pgto_ed = lista_pgto_ed.index(pgto_orig) if pgto_orig in lista_pgto_ed else 0
+                                ed_forma_pagto = st.selectbox("Forma de Pagamento", lista_pgto_ed, index=idx_pgto_ed)
+                                
+                                # Lógica de parcelas na edição
+                                pode_parcelar_ed = ed_tipo in ["Gasto Variável", "Gasto Fixo"]
+                                if pode_parcelar_ed:
+                                    parc_orig = orig.get('Parcelado', 'Não')
+                                    idx_parc_ed = 0 if parc_orig == "Não" else 1
+                                    ed_parcelado = st.radio("Compra Parcelada?", ["Não", "Sim"], index=idx_parc_ed, horizontal=True)
+                                    
+                                    try:
+                                        tot_parc_orig = int(orig.get('Parcelas_Totais', 1))
+                                    except:
+                                        tot_parc_orig = 1
+                                    
+                                    if ed_parcelado == "Sim":
+                                        ed_num_parcelas = st.number_input("Quantidade de Parcelas", min_value=2, max_value=48, value=max(2, tot_parc_orig), step=1)
+                                    else:
+                                        ed_num_parcelas = 1
+                                else:
+                                    ed_parcelado = "Não"
+                                    ed_num_parcelas = 1
+                                    
+                            botao_atualizar = st.form_submit_button("💾 Salvar Alterações")
+                            
+                            if botao_atualizar:
+                                if ed_descricao and ed_valor > 0:
+                                    valores_atualizados = [
+                                        str(ed_data), ed_descricao, ed_valor, ed_categoria, ed_tipo,
+                                        ed_responsavel, ed_forma_pagto, ed_parcelado, int(ed_num_parcelas)
+                                    ]
+                                    try:
+                                        # Atualiza a linha exata no Google Sheets (Colunas A-I)
+                                        sheet_conn.update(f"A{linha_planilha}:I{linha_planilha}", [valores_atualizados])
+                                        st.success(f"Excelente! Linha {linha_planilha} atualizada com sucesso.")
+                                        st.balloons()
+                                        st.rerun()
+                                    except Exception as ex:
+                                        st.error(f"Erro ao atualizar planilha: {ex}")
+                                else:
+                                    st.error("Preencha todos os campos obrigatórios.")
+                        
+                        # ZONA DE EXCLUSÃO SEGURA
+                        st.markdown("---")
+                        st.markdown("### ⚠️ Zona de Perigo (Excluir Permanentemente)")
+                        st.write("Marque a caixa de verificação abaixo caso queira remover este registro do seu banco de dados:")
+                        confirma_exclusao = st.checkbox(f"Confirmo que desejo apagar para sempre o registro da Linha {linha_planilha}.")
+                        
+                        if st.button("🗑️ Excluir Lançamento", type="primary", disabled=not confirma_exclusao):
+                            try:
+                                # Apaga a linha da planilha
+                                sheet_conn.delete_rows(linha_planilha)
+                                st.success(f"O registro da Linha {linha_planilha} foi excluído da planilha.")
+                                st.rerun()
+                            except Exception as ex:
+                                st.error(f"Erro ao excluir o registro: {ex}")
+                else:
+                    st.info("Nenhum lançamento foi encontrado para editar.")
         else:
             st.info("Sem dados projetados disponíveis.")
     else:
