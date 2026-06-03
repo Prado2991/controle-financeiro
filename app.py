@@ -59,8 +59,8 @@ def converter_para_data(valor_data):
             return date.today()
 
 # --- INTERFACE DO USUÁRIO ---
-st.title("💰 Controle Financeiro Familiar")
-st.markdown("### Jonathan & Bruna")
+st.title("💰 Controle Financeiro")
+st.markdown("### Jonathan Prado")
 
 tabs = st.tabs(["📲 Novo Lançamento", "📊 Dashboard & Resumos", "💳 Parcelas & Projeções"])
 
