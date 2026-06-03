@@ -116,7 +116,7 @@ def calcular_mes_competencia(data_compra, forma_pagamento):
     return data_fatura.strftime("%Y-%m")
 
 # INTERFACE DO USUÁRIO
-st.title("💰 Controle Financeiro Familiar")
+st.title("💰 Controle Financeiro")
 st.markdown("### Jonathan Prado")
 
 tabs = st.tabs(["📲 Novo Lançamento", "📊 Dashboard & Resumos", "💳 Controle de Parcelas"])
