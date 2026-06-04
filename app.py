@@ -296,7 +296,7 @@ def calcular_mes_competencia(data_compra, forma_pagamento):
     return data_fatura.strftime("%Y-%m")
 
 # Título principal da aplicação com as animações e estilos definidos
-st.markdown('<div class="gradient-title">💰 Controle Financeiro Familiar</div>', unsafe_allow_html=True)
+st.markdown('<div class="gradient-title">💰 Controle Financeiro</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle-text">Jonathan Prado</div>', unsafe_allow_html=True)
 
 # Barra informativa do fechamento da fatura
