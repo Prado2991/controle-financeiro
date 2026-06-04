@@ -5,6 +5,7 @@ from dateutil.relativedelta import relativedelta
 import gspread
 from google.oauth2.service_account import Credentials
 import json
+import unicodedata
 
 # Configuração da página para visualização Mobile-First e Temática Elegante
 st.set_page_config(
@@ -126,6 +127,77 @@ def conectar_planilha():
 
 sheet_conn = conectar_planilha()
 
+def normalizar_df(df):
+    # Dicionário mapeando variações de cabeçalhos comuns para o padrão esperado pelo código
+    mapeamento_colunas = {
+        'data': 'Data',
+        'datadecompra': 'Data',
+        'data do lancamento': 'Data',
+        'data do lançamento': 'Data',
+        'carimbo de data/hora': 'Data',
+        'descricao': 'Descricao',
+        'descrição': 'Descricao',
+        'valor': 'Valor',
+        'valor (r$)': 'Valor',
+        'categoria': 'Categoria',
+        'tipo': 'Tipo',
+        'tipo de lancamento': 'Tipo',
+        'tipo de lançamento': 'Tipo',
+        'responsavel': 'Responsavel',
+        'responsável': 'Responsavel',
+        'para quem?': 'Responsavel',
+        'para quem': 'Responsavel',
+        'forma_pagamento': 'Forma_Pagamento',
+        'forma de pagamento': 'Forma_Pagamento',
+        'forma_pagto': 'Forma_Pagamento',
+        'forma de pagto': 'Forma_Pagamento',
+        'parcelado': 'Parcelado',
+        'compra parcelada?': 'Parcelado',
+        'parcelado?': 'Parcelado',
+        'parcelas_totais': 'Parcelas_Totais',
+        'parcelas totais': 'Parcelas_Totais',
+        'quantidade de parcelas': 'Parcelas_Totais'
+    }
+    
+    colunas_novas = {}
+    for col in df.columns:
+        # Remove acentuação e converte para minúsculo sem espaços nas extremidades
+        col_limpa = "".join(c for c in unicodedata.normalize('NFD', str(col)) if unicodedata.category(c) != 'Mn')
+        col_normalizada = col_limpa.strip().lower()
+        
+        if col_normalizada in mapeamento_colunas:
+            colunas_novas[col] = mapeamento_colunas[col_normalizada]
+        else:
+            colunas_novas[col] = str(col).strip()
+            
+    df = df.rename(columns=colunas_novas)
+    
+    # Garante a existência das colunas necessárias para evitar KeyError no código
+    colunas_obrigatorias = ['Data', 'Descricao', 'Valor', 'Categoria', 'Tipo', 'Responsavel', 'Forma_Pagamento', 'Parcelado', 'Parcelas_Totais']
+    for col in colunas_obrigatorias:
+        if col not in df.columns:
+            if col == 'Parcelas_Totais':
+                df[col] = 1
+            elif col == 'Parcelado':
+                df[col] = 'Não'
+            elif col == 'Valor':
+                df[col] = 0.0
+            else:
+                df[col] = ''
+    return df
+
+def limpar_valor_monetario(val):
+    try:
+        if pd.isna(val) or val == "":
+            return 0.0
+        val_str = str(val).strip().replace('R$', '').replace(' ', '')
+        if '.' in val_str and ',' in val_str:
+            val_str = val_str.replace('.', '')
+        val_str = val_str.replace(',', '.')
+        return float(val_str)
+    except Exception:
+        return 0.0
+
 def calcular_mes_competencia(data_compra, forma_pagamento):
     if "Cartão" not in forma_pagamento:
         return data_compra.strftime("%Y-%m")
@@ -152,7 +224,6 @@ st.info(f"⏳ **Fechamento de Faturas:** Faltam **{dias_restantes} dias** para o
 
 tabs = st.tabs(["📲 Novo Lançamento", "📊 Dashboard & Resumos", "💳 Controle de Parcelas & Assinaturas", "✏️ Ajustar Lançamentos"])
 
-# TAB 1: FORMULÁRIO DE LANÇAMENTO (OTIMIZADO PARA CELULAR)
 with tabs[0]:
     st.subheader("Registrar Gasto ou Entrada")
     if sheet_conn is None:
@@ -188,9 +259,11 @@ with tabs[0]:
                 
                 categoria = st.selectbox("Categoria", lista_cats)
                 
-                responsavel = st.selectbox(
+                # MULTISELECT para permitir divisão dinâmica de gastos
+                responsavel = st.multiselect(
                     "Para Quem?", 
-                    ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"]
+                    ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"],
+                    default=["Jonathan"]
                 )
                 
                 forma_pagto = st.selectbox(
@@ -213,13 +286,22 @@ with tabs[0]:
             botao_salvar = st.form_submit_button("🚀 Gravar na Planilha")
             
             if botao_salvar:
-                if descricao and valor > 0:
+                if not responsavel:
+                    st.error("Por favor, selecione pelo menos uma pessoa no campo 'Para Quem?'.")
+                elif descricao and valor > 0:
+                    # Correção Crítica de Decimais: Converte o valor para formato com vírgula do Sheets brasileiro
+                    valor_com_virgula = f"{valor:.2f}".replace('.', ',')
+                    
+                    # Converte lista de responsáveis para String com vírgulas para salvar no Sheets
+                    responsavel_str = ", ".join(responsavel)
+                    
                     novo_registro = [
-                        str(data), descricao, valor, categoria, tipo, 
-                        responsavel, forma_pagto, parcelado, int(num_parcelas)
+                        str(data), descricao, valor_com_virgula, categoria, tipo, 
+                        responsavel_str, forma_pagto, parcelado, int(num_parcelas)
                     ]
                     try:
-                        sheet_conn.append_row(novo_registro)
+                        # USER_ENTERED força o Sheets a ler "12,90" como o número doze e noventa
+                        sheet_conn.append_row(novo_registro, value_input_option='USER_ENTERED')
                         st.success(f"Sucesso! '{descricao}' gravado na planilha.")
                         st.balloons()
                     except Exception as e:
@@ -229,13 +311,15 @@ with tabs[0]:
 
 if sheet_conn is not None:
     try:
-        dados_brutos = pd.DataFrame(sheet_conn.get_all_records())
+        raw_data = sheet_conn.get_all_records()
+        dados_brutos = pd.DataFrame(raw_data)
+        dados_brutos = normalizar_df(dados_brutos)
     except Exception as e:
         dados_brutos = pd.DataFrame()
         st.warning("Aguardando lançamentos na aba 'Lancamentos' para carregar os gráficos.")
 
     if not dados_brutos.empty:
-        # Processar projeções de parcelas futuras e assinaturas automáticas em memória
+        # Processar projeções de parcelas futuras e divisões dinâmicas em memória
         lista_projetada = []
         for index, row in dados_brutos.iterrows():
             try:
@@ -250,31 +334,48 @@ if sheet_conn is not None:
             
             tipo_lanc = row.get('Tipo', 'Gasto Variável')
             total_parc = int(row['Parcelas_Totais']) if row.get('Parcelas_Totais') else 1
-            valor_total = float(str(row['Valor']).replace(',', '.')) if row.get('Valor') else 0.0
+            valor_total = limpar_valor_monetario(row.get('Valor', 0.0))
+            
+            # Lógica inteligente de divisão: Detecta se tem mais de um beneficiário na coluna
+            responsavel_campo = str(row.get('Responsavel', 'Jonathan'))
+            responsaveis_lista = [r.strip() for r in responsavel_campo.replace('/', ',').split(',') if r.strip()]
+            if not responsaveis_lista:
+                responsaveis_lista = ["Jonathan"]
+            
+            num_responsaveis = len(responsaveis_lista)
             
             # Projeção automática de assinaturas recorrentes por 12 meses futuros
             if tipo_lanc == "Assinatura":
+                # Divide o valor total pelo número de beneficiários selecionados
+                val_dividido = valor_total / num_responsaveis
+                
                 for m in range(12):
                     dt_recorrente = dt_compra + relativedelta(months=m)
                     mes_competencia = calcular_mes_competencia(dt_recorrente, row.get('Forma_Pagamento', 'Dinheiro'))
                     
-                    item_proj = row.to_dict()
-                    item_proj['Mes_Fatura'] = mes_competencia
-                    item_proj['Valor_Parcela'] = valor_total
-                    item_proj['Parcela_Atual'] = "Recorrente"
-                    lista_projetada.append(item_proj)
+                    for r_individual in responsaveis_lista:
+                        item_proj = row.to_dict()
+                        item_proj['Mes_Fatura'] = mes_competencia
+                        item_proj['Valor_Parcela'] = val_dividido
+                        item_proj['Responsavel'] = r_individual  # Atribui a parcela dividida ao seu respectivo dono no gráfico
+                        item_proj['Parcela_Atual'] = "Recorrente"
+                        lista_projetada.append(item_proj)
             else:
                 # Compras normais e parceladas
                 val_parcela = valor_total / total_parc if row.get('Parcelado') == 'Sim' else valor_total
+                val_dividido = val_parcela / num_responsaveis
+                
                 for p in range(total_parc):
                     dt_parcela = dt_compra + relativedelta(months=p)
                     mes_competencia = calcular_mes_competencia(dt_parcela, row.get('Forma_Pagamento', 'Dinheiro'))
                     
-                    item_proj = row.to_dict()
-                    item_proj['Mes_Fatura'] = mes_competencia
-                    item_proj['Valor_Parcela'] = val_parcela
-                    item_proj['Parcela_Atual'] = f"{p+1}/{total_parc}" if row.get('Parcelado') == 'Sim' else "1/1"
-                    lista_projetada.append(item_proj)
+                    for r_individual in responsaveis_lista:
+                        item_proj = row.to_dict()
+                        item_proj['Mes_Fatura'] = mes_competencia
+                        item_proj['Valor_Parcela'] = val_dividido
+                        item_proj['Responsavel'] = r_individual  # Atribui a fatura dividida ao gráfico do respectivo dono
+                        item_proj['Parcela_Atual'] = f"{p+1}/{total_parc}" if row.get('Parcelado') == 'Sim' else "1/1"
+                        lista_projetada.append(item_proj)
                 
         if lista_projetada:
             df_projetado = pd.DataFrame(lista_projetada)
@@ -290,7 +391,6 @@ if sheet_conn is not None:
             
             df_projetado['Data_Exibicao'] = df_projetado['Data'].apply(formatar_data_br)
             
-            # TAB 2: DASHBOARD
             with tabs[1]:
                 st.subheader("Resumo Mensal e Faturas")
                 
@@ -340,7 +440,6 @@ if sheet_conn is not None:
                 else:
                     st.info("Nenhum mês disponível para análise.")
 
-            # TAB 3: CONTROLE DE PARCELAS ACUMULADAS E ASSINATURAS
             with tabs[2]:
                 st.subheader("Dívidas Parceladas e Controle de Assinaturas")
                 
@@ -376,7 +475,6 @@ if sheet_conn is not None:
                     else:
                         st.info("Nenhuma assinatura cadastrada. Registre uma com o tipo 'Assinatura' para acompanhar o impacto automático.")
 
-            # TAB 4: AJUSTAR LANÇAMENTOS (EDITAR E APAGAR DE FORMA DINÂMICA)
             with tabs[3]:
                 st.subheader("✏️ Alterar ou Excluir Lançamentos")
                 st.markdown("Se você digitou alguma informação incorreta ou deseja excluir um registro da planilha, ajuste os campos abaixo:")
@@ -386,7 +484,7 @@ if sheet_conn is not None:
                 for idx, row in dados_brutos.iterrows():
                     num_linha = idx + 2  # Linha 1 é o cabeçalho, então a primeira linha de dados é a 2
                     desc = row.get('Descricao', 'Sem Descrição')
-                    val = row.get('Valor', 0.0)
+                    val = limpar_valor_monetario(row.get('Valor', 0.0))
                     dt = row.get('Data', '')
                     
                     rotulo = f"Linha {num_linha} | {dt} | {desc} - R$ {val}"
@@ -424,12 +522,7 @@ if sheet_conn is not None:
                                 
                                 ed_data = st.date_input("Data do Lançamento", dt_orig, format="DD/MM/YYYY")
                                 ed_descricao = st.text_input("Descrição", value=orig.get('Descricao', ''))
-                                
-                                try:
-                                    val_orig = float(str(orig.get('Valor', 0.0)).replace(',', '.'))
-                                except:
-                                    val_orig = 0.0
-                                ed_valor = st.number_input("Valor (R$)", min_value=0.0, value=val_orig, step=0.01, format="%.2f")
+                                ed_valor = st.number_input("Valor (R$)", min_value=0.0, value=limpar_valor_monetario(orig.get('Valor', 0.0)), step=0.01, format="%.2f")
                                 
                                 tipo_orig = orig.get('Tipo', 'Gasto Variável')
                                 lista_tipos_sup = ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"]
@@ -451,10 +544,17 @@ if sheet_conn is not None:
                                 idx_cat_ed = lista_cats_ed.index(cat_orig) if cat_orig in lista_cats_ed else 0
                                 ed_categoria = st.selectbox("Categoria", lista_cats_ed, index=idx_cat_ed)
                                 
-                                resp_orig = orig.get('Responsavel', 'Jonathan')
-                                lista_resp_ed = ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"]
-                                idx_resp_ed = lista_resp_ed.index(resp_orig) if resp_orig in lista_resp_ed else 0
-                                ed_responsavel = st.selectbox("Para Quem?", lista_resp_ed, index=idx_resp_ed)
+                                # Leitura e split de múltiplos responsáveis na edição
+                                resp_orig_str = str(orig.get('Responsavel', 'Jonathan'))
+                                resp_orig_lista = [r.strip() for r in resp_orig_str.replace('/', ',').split(',') if r.strip()]
+                                if not resp_orig_lista:
+                                    resp_orig_lista = ["Jonathan"]
+                                
+                                ed_responsavel = st.multiselect(
+                                    "Para Quem?", 
+                                    ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"],
+                                    default=resp_orig_lista
+                                )
                                 
                                 pgto_orig = orig.get('Forma_Pagamento', 'Cartão Nu')
                                 lista_pgto_ed = ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"]
@@ -484,14 +584,20 @@ if sheet_conn is not None:
                             botao_atualizar = st.form_submit_button("💾 Salvar Alterações")
                             
                             if botao_atualizar:
-                                if ed_descricao and ed_valor > 0:
+                                if not ed_responsavel:
+                                    st.error("Selecione ao menos um responsável no campo 'Para Quem?'.")
+                                elif ed_descricao and ed_valor > 0:
+                                    # Formatação de vírgula também no salvamento de edições
+                                    ed_valor_com_virgula = f"{ed_valor:.2f}".replace('.', ',')
+                                    ed_responsavel_str = ", ".join(ed_responsavel)
+                                    
                                     valores_atualizados = [
-                                        str(ed_data), ed_descricao, ed_valor, ed_categoria, ed_tipo,
-                                        ed_responsavel, ed_forma_pagto, ed_parcelado, int(ed_num_parcelas)
+                                        str(ed_data), ed_descricao, ed_valor_com_virgula, ed_categoria, ed_tipo,
+                                        ed_responsavel_str, ed_forma_pagto, ed_parcelado, int(ed_num_parcelas)
                                     ]
                                     try:
-                                        # Atualiza a linha exata no Google Sheets (Colunas A-I)
-                                        sheet_conn.update(f"A{linha_planilha}:I{linha_planilha}", [valores_atualizados])
+                                        # Atualiza a linha exata no Google Sheets (Colunas A-I) com formatação correta
+                                        sheet_conn.update(f"A{linha_planilha}:I{linha_planilha}", [valores_atualizados], value_input_option='USER_ENTERED')
                                         st.success(f"Excelente! Linha {linha_planilha} atualizada com sucesso.")
                                         st.balloons()
                                         st.rerun()
@@ -500,7 +606,6 @@ if sheet_conn is not None:
                                 else:
                                     st.error("Preencha todos os campos obrigatórios.")
                         
-                        # ZONA DE EXCLUSÃO SEGURA
                         st.markdown("---")
                         st.markdown("### ⚠️ Zona de Perigo (Excluir Permanentemente)")
                         st.write("Marque a caixa de verificação abaixo caso queira remover este registro do seu banco de dados:")
