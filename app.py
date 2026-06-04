@@ -34,6 +34,24 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def converter_valor_para_float(texto):
+    """
+    Função robusta que converte qualquer formato de texto monetário digitado pelo usuário
+    (ex: '12,90', '1.250,50', 'R$ 15,00') em float compatível com cálculos em Python.
+    """
+    if not texto:
+        return 0.0
+    try:
+        texto_limpo = str(texto).replace("R$", "").replace(" ", "").strip()
+        # Se contiver pontos de milhar e vírgula decimal, remove os pontos de milhar
+        if "." in texto_limpo and "," in texto_limpo:
+            texto_limpo = texto_limpo.replace(".", "")
+        # Substitui a vírgula pelo ponto decimal de programação
+        texto_limpo = texto_limpo.replace(",", ".")
+        return float(texto_limpo)
+    except Exception:
+        return 0.0
+
 def conectar_planilha():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -238,7 +256,9 @@ with tabs[0]:
                     "Descrição", 
                     placeholder="Ex: Sorveteria Sávio, Roupas na Shein, Mercado Muffato"
                 )
-                valor = st.number_input("Valor (R$)", min_value=0.0, step=0.01, format="%.2f")
+                
+                # ALTERAÇÃO CRÍTICA: Uso de text_input para resolver o teclado numérico do celular
+                valor_texto = st.text_input("Valor (R$)", placeholder="Ex: 12,90 ou 150,00")
                 
                 # Seletor do Tipo de Gasto
                 tipo = st.selectbox(
@@ -286,11 +306,13 @@ with tabs[0]:
             botao_salvar = st.form_submit_button("🚀 Gravar na Planilha")
             
             if botao_salvar:
+                valor_convertido = converter_valor_para_float(valor_texto)
+                
                 if not responsavel:
                     st.error("Por favor, selecione pelo menos uma pessoa no campo 'Para Quem?'.")
-                elif descricao and valor > 0:
+                elif descricao and valor_convertido > 0:
                     # Correção Crítica de Decimais: Converte o valor para formato com vírgula do Sheets brasileiro
-                    valor_com_virgula = f"{valor:.2f}".replace('.', ',')
+                    valor_com_virgula = f"{valor_convertido:.2f}".replace('.', ',')
                     
                     # Converte lista de responsáveis para String com vírgulas para salvar no Sheets
                     responsavel_str = ", ".join(responsavel)
@@ -302,12 +324,12 @@ with tabs[0]:
                     try:
                         # USER_ENTERED força o Sheets a ler "12,90" como o número doze e noventa
                         sheet_conn.append_row(novo_registro, value_input_option='USER_ENTERED')
-                        st.success(f"Sucesso! '{descricao}' gravado na planilha.")
+                        st.success(f"Sucesso! '{descricao}' gravado na planilha com valor de R$ {valor_convertido:,.2f}.")
                         st.balloons()
                     except Exception as e:
                         st.error(f"Erro ao salvar na planilha: {e}")
                 else:
-                    st.error("Por favor, preencha a descrição e defina um valor válido maior que zero.")
+                    st.error("Por favor, preencha a descrição e defina um valor válido maior que zero (use a vírgula para centavos).")
 
 if sheet_conn is not None:
     try:
@@ -522,7 +544,10 @@ if sheet_conn is not None:
                                 
                                 ed_data = st.date_input("Data do Lançamento", dt_orig, format="DD/MM/YYYY")
                                 ed_descricao = st.text_input("Descrição", value=orig.get('Descricao', ''))
-                                ed_valor = st.number_input("Valor (R$)", min_value=0.0, value=limpar_valor_monetario(orig.get('Valor', 0.0)), step=0.01, format="%.2f")
+                                
+                                # ALTERAÇÃO CRÍTICA NA EDIÇÃO: Usar caixa de texto com a vírgula original do Sheets
+                                valor_original_texto = f"{limpar_valor_monetario(orig.get('Valor', 0.0)):.2f}".replace('.', ',')
+                                ed_valor_texto = st.text_input("Valor (R$)", value=valor_original_texto, placeholder="Ex: 12,90")
                                 
                                 tipo_orig = orig.get('Tipo', 'Gasto Variável')
                                 lista_tipos_sup = ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"]
@@ -584,11 +609,13 @@ if sheet_conn is not None:
                             botao_atualizar = st.form_submit_button("💾 Salvar Alterações")
                             
                             if botao_atualizar:
+                                ed_valor_float = converter_valor_para_float(ed_valor_texto)
+                                
                                 if not ed_responsavel:
                                     st.error("Selecione ao menos um responsável no campo 'Para Quem?'.")
-                                elif ed_descricao and ed_valor > 0:
+                                elif ed_descricao and ed_valor_float > 0:
                                     # Formatação de vírgula também no salvamento de edições
-                                    ed_valor_com_virgula = f"{ed_valor:.2f}".replace('.', ',')
+                                    ed_valor_com_virgula = f"{ed_valor_float:.2f}".replace('.', ',')
                                     ed_responsavel_str = ", ".join(ed_responsavel)
                                     
                                     valores_atualizados = [
