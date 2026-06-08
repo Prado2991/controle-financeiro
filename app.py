@@ -5,7 +5,6 @@ from dateutil.relativedelta import relativedelta
 import gspread
 from google.oauth2.service_account import Credentials
 import json
-import unicodedata
 import plotly.express as px
 import plotly.graph_objects as go
 
@@ -17,168 +16,140 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Estilização CSS personalizada para visual premium, animações fluidas e cores Indigo/Emerald
 st.markdown("""
 <style>
-    /* Transições e Animações com Bezier Cúbico de 500ms */
-    @keyframes fadeInUp {
-        from {
-            opacity: 0;
-            transform: translateY(15px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    .animate-card {
-        animation: fadeInUp 500ms cubic-bezier(0.25, 1, 0.5, 1) forwards;
-    }
-
-    /* Título principal com gradiente Indigo/Emerald */
-    .gradient-title {
-        background: linear-gradient(135deg, #6366f1 0%, #10b981 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 2.8rem;
-        font-weight: 800;
-        text-align: center;
-        margin-bottom: 0.1rem;
-        animation: fadeInUp 600ms cubic-bezier(0.25, 1, 0.5, 1) forwards;
-    }
-    
-    .subtitle-text {
-        text-align: center;
-        color: #6b7280;
-        font-size: 1.1rem;
-        margin-bottom: 2rem;
-        font-weight: 500;
-    }
-
-    /* Personalização das Abas (Tabs) do Streamlit */
+    /* Transições e animações fluidas (Cúbico de Entrada 500ms) */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 12px;
-        background-color: transparent;
-        border-bottom: 2px solid #e5e7eb;
-        padding-bottom: 4px;
+        gap: 8px;
+        transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
     }
     
     .stTabs [data-baseweb="tab"] {
-        padding: 10px 22px;
-        border-radius: 12px 12px 0px 0px;
-        background-color: #f3f4f6;
-        color: #4b5563;
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #f1f5f9;
+        border-radius: 8px 8px 0px 0px;
+        gap: 4px;
+        padding: 10px 16px;
         font-weight: 600;
-        transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
-        border: none;
-    }
-    
-    .stTabs [data-baseweb="tab"]:hover {
-        background-color: #e5e7eb;
-        color: #4f46e5;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%) !important;
-        color: #ffffff !important;
-        box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+        color: #475569;
+        transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
     }
 
-    /* Grid e Cartões de KPI Estilizados */
-    .kpi-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 1.5rem;
-        margin-bottom: 2.5rem;
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #e2e8f0;
+        color: #1e1b4b;
     }
-    
-    .kpi-card {
-        border-radius: 16px;
-        padding: 1.6rem;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
-        transition: all 400ms cubic-bezier(0.25, 1, 0.5, 1);
+
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        background-color: #312e81;
+        color: #ffffff !important;
+        border-bottom: 3px solid #10b981;
+    }
+
+    /* Cards de KPI personalizados com gradientes, sombras físicas e hover */
+    .kpi-container {
         display: flex;
         flex-direction: column;
-        justify-content: center;
-        border: 1px solid rgba(229, 231, 235, 0.5);
-        position: relative;
-        overflow: hidden;
+        justify-content: space-between;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        height: 100%;
+        color: white;
     }
-    
-    .kpi-card:hover {
-        transform: translateY(-6px);
-        box-shadow: 0 20px 25px -5px rgba(99, 102, 241, 0.15), 0 10px 10px -5px rgba(16, 185, 129, 0.1);
+
+    .kpi-container:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
     }
-    
-    /* Cores dos gradientes dos cards */
-    .gradient-entradas {
-        background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
-        color: #ffffff;
+
+    .kpi-entradas {
+        background: linear-gradient(135deg, #064e3b 0%, #065f46 100%); /* Emerald escuro */
+        border-left: 5px solid #34d399;
     }
-    .gradient-despesas {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        color: #ffffff;
+
+    .kpi-saidas {
+        background: linear-gradient(135deg, #4c1d95 0%, #5b21b6 100%); /* Purple/Indigo escuro */
+        border-left: 5px solid #a78bfa;
     }
-    .gradient-nu {
-        background: linear-gradient(135deg, #6d28d9 0%, #7c3aed 100%);
-        color: #ffffff;
+
+    .kpi-nu {
+        background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%); /* Deep Indigo */
+        border-left: 5px solid #818cf8;
     }
-    .gradient-bb {
-        background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
-        color: #ffffff;
+
+    .kpi-bb {
+        background: linear-gradient(135deg, #111827 0%, #1f2937 100%); /* Gray/Dark */
+        border-left: 5px solid #fbbf24;
     }
-    
-    .kpi-label {
-        font-size: 0.85rem;
-        font-weight: 600;
+
+    .kpi-title {
+        font-size: 14px;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.05em;
         opacity: 0.9;
-        margin-bottom: 0.6rem;
-    }
-    
-    .kpi-value {
-        font-size: 1.75rem;
-        font-weight: 800;
-        letter-spacing: -0.02em;
-    }
-    
-    .kpi-sub {
-        font-size: 0.8rem;
-        margin-top: 0.6rem;
-        opacity: 0.85;
         font-weight: 500;
+    }
+
+    .kpi-value {
+        font-size: 26px;
+        font-weight: 700;
+        margin-top: 8px;
+        margin-bottom: 4px;
+    }
+
+    .kpi-subtitle {
+        font-size: 12px;
+        opacity: 0.8;
+    }
+
+    /* Título com gradiente elegante */
+    .main-title {
+        background: linear-gradient(to right, #312e81, #047857);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-size: 32px;
+        font-weight: 800;
+        margin-bottom: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
 
+# FUNÇÃO DE CONVERSÃO BRASILEIRA DE MOEDA (Para relatórios e visualizações)
 def formatar_brl(valor):
-    """
-    Formata um valor float ou string para o padrão de moeda oficial brasileiro (R$ 1.250,50).
-    """
     try:
-        val_float = float(valor)
-        puro = f"{val_float:,.2f}"
-        tabela_sub = puro.maketrans(",.", ".,")
-        return f"R$ {puro.translate(tabela_sub)}"
-    except Exception:
+        val = float(valor)
+        return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except:
         return "R$ 0,00"
 
-def converter_valor_para_float(texto):
-    """
-    Converte qualquer formato de texto monetário em float compatível com cálculos.
-    """
-    if not texto:
+# FUNÇÃO CRÍTICA DE TRATAMENTO NUMÉRICO DE ENTRADA (Impede R$ 8,99 de virar R$ 899,00)
+def tratar_entrada_numerica(texto_valor):
+    if not texto_valor:
         return 0.0
     try:
-        texto_limpo = str(texto).replace("R$", "").replace(" ", "").strip()
-        if "." in texto_limpo and "," in texto_limpo:
-            texto_limpo = texto_limpo.replace(".", "")
-        texto_limpo = texto_limpo.replace(",", ".")
-        return float(texto_limpo)
-    except Exception:
+        # Remove símbolos de moeda e espaços em branco comuns
+        texto_limpo = str(texto_valor).replace("R$", "").replace("r$", "").strip()
+        
+        # Caso clássico brasileiro: "1.250,50" -> pontos são milhares, vírgula é decimal
+        if "," in texto_limpo and "." in texto_limpo:
+            # Remove o ponto de milhar e substitui a vírgula decimal por ponto
+            texto_limpo = texto_limpo.replace(".", "").replace(",", ".")
+        # Caso: "8,99" -> apenas vírgula separando centavos
+        elif "," in texto_limpo:
+            texto_limpo = texto_limpo.replace(",", ".")
+        
+        # Converte para float final do Python
+        val_float = float(texto_limpo)
+        return round(val_float, 2)
+    except Exception as e:
+        st.error(f"Erro ao processar o formato do número '{texto_valor}'. Certifique-se de digitar números válidos.")
         return 0.0
 
+# CONEXÃO COM O GOOGLE SHEETS COM DIAGNÓSTICO DETALHADO
 def conectar_planilha():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -186,9 +157,7 @@ def conectar_planilha():
     ]
     
     if "google_credentials" not in st.secrets:
-        st.error("""
-        ❌ **Erro de Configuração:** O segredo `google_credentials` não foi encontrado no painel de Secrets do Streamlit.
-        """)
+        st.error("❌ **Erro de Configuração:** O segredo `google_credentials` não foi encontrado no painel de Secrets do Streamlit.")
         return None
         
     try:
@@ -216,7 +185,7 @@ def conectar_planilha():
             plan_aberta = client.open_by_key(planilha_id)
         except Exception as open_err:
             email_servico = creds_json.get("client_email", "e-mail desconhecido")
-            st.error(f"❌ **A Planilha não foi Compartilhada ou o ID está incorreto!** Compartilhe como Editor com: {email_servico}")
+            st.error(f"❌ **Planilha não compartilhada com a API:** Compartilhe com `{email_servico}`")
             return None
             
         try:
@@ -232,108 +201,69 @@ def conectar_planilha():
 
 sheet_conn = conectar_planilha()
 
-def normalizar_df(df):
-    mapeamento_colunas = {
-        'data': 'Data',
-        'datadecompra': 'Data',
-        'descricao': 'Descricao',
-        'descrição': 'Descricao',
-        'valor': 'Valor',
-        'categoria': 'Categoria',
-        'tipo': 'Tipo',
-        'responsavel': 'Responsavel',
-        'responsável': 'Responsavel',
-        'forma_pagamento': 'Forma_Pagamento',
-        'forma de pagamento': 'Forma_Pagamento',
-        'parcelado': 'Parcelado',
-        'parcelas_totais': 'Parcelas_Totais',
-        'parcelas totais': 'Parcelas_Totais'
-    }
-    
-    colunas_novas = {}
-    for col in df.columns:
-        col_limpa = "".join(c for c in unicodedata.normalize('NFD', str(col)) if unicodedata.category(c) != 'Mn')
-        col_normalizada = col_limpa.strip().lower()
-        if col_normalizada in mapeamento_colunas:
-            colunas_novas[col] = mapeamento_colunas[col_normalizada]
-        else:
-            colunas_novas[col] = str(col).strip()
-            
-    df = df.rename(columns=colunas_novas)
-    
-    colunas_obrigatorias = ['Data', 'Descricao', 'Valor', 'Categoria', 'Tipo', 'Responsavel', 'Forma_Pagamento', 'Parcelado', 'Parcelas_Totais']
-    for col in colunas_obrigatorias:
-        if col not in df.columns:
-            if col == 'Parcelas_Totais':
-                df[col] = 1
-            elif col == 'Parcelado':
-                df[col] = 'Não'
-            elif col == 'Valor':
-                df[col] = 0.0
-            else:
-                df[col] = ''
-    return df
-
-def limpar_valor_monetario(val):
-    try:
-        if pd.isna(val) or val == "":
-            return 0.0
-        val_str = str(val).strip().replace('R$', '').replace(' ', '')
-        if '.' in val_str and ',' in val_str:
-            val_str = val_str.replace('.', '')
-        val_str = val_str.replace(',', '.')
-        return float(val_str)
-    except Exception:
-        return 0.0
-
+# LÓGICA DE FATURA (FECHAMENTO DIA 07) E PARCELAMENTO
 def calcular_mes_competencia(data_compra, forma_pagamento):
     if "Cartão" not in forma_pagamento:
         return data_compra.strftime("%Y-%m")
+    
     if data_compra.day > 7:
         data_fatura = data_compra + relativedelta(months=1)
     else:
         data_fatura = data_compra
     return data_fatura.strftime("%Y-%m")
 
-# Título principal da aplicação com as animações e estilos definidos
-st.markdown('<div class="gradient-title">💰 Controle Financeiro</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle-text">Jonathan Prado</div>', unsafe_allow_html=True)
+# INTERFACE DO USUÁRIO
+st.markdown('<div class="main-title">💰 Controle Financeiro Familiar</div>', unsafe_allow_html=True)
+st.markdown("### Jonathan Prado")
 
-# Barra informativa do fechamento da fatura
+# Barra de progresso para fechamento da fatura corrente (Dia 07)
 hoje = date.today()
 vencimento_limite = date(hoje.year, hoje.month, 7)
 if hoje.day > 7:
     vencimento_limite = vencimento_limite + relativedelta(months=1)
 dias_restantes = (vencimento_limite - hoje).days
+
 st.info(f"⏳ **Fechamento de Faturas:** Faltam **{dias_restantes} dias** para o fechamento dos cartões (Próximo dia 07: {vencimento_limite.strftime('%d/%m/%Y')})")
 
 tabs = st.tabs(["📲 Novo Lançamento", "📊 Dashboard & Resumos", "💳 Controle de Parcelas & Assinaturas", "✏️ Ajustar Lançamentos"])
 
+# TAB 1: FORMULÁRIO DE LANÇAMENTO (OTIMIZADO PARA CELULAR)
 with tabs[0]:
     st.subheader("Registrar Gasto ou Entrada")
     if sheet_conn is None:
-        st.info("⚠️ **O formulário de envio está temporariamente desativado devido a problemas de conexão com a planilha.**")
+        st.info("⚠️ **O formulário de envio está temporariamente desativado devido a problemas de conexão.**")
     else:
         with st.form("form_lancamento", clear_on_submit=True):
             col1, col2 = st.columns([1, 1])
             with col1:
                 data = st.date_input("Data do Lançamento", date.today(), format="DD/MM/YYYY")
                 descricao = st.text_input("Descrição", placeholder="Ex: Sorveteria Sávio, Roupas na Shein, Mercado Muffato")
-                valor_texto = st.text_input("Valor (R$)", placeholder="Ex: 12,90 ou 150,00")
+                
+                # Mudança de Input de Número para TEXTO livre (Garante que a vírgula possa ser digitada no teclado brasileiro do celular)
+                valor_texto = st.text_input("Valor (R$)", value="0,00", help="Use vírgula para centavos. Exemplo: 8,99 ou 150,50")
+                
                 tipo = st.selectbox("Tipo de Lançamento", ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"])
             
             with col2:
+                # Lógica dinâmica de categorias
                 if tipo == "Gasto Fixo":
                     lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
                 elif tipo == "Gasto Variável":
                     lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
                 elif tipo == "Assinatura":
                     lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
-                else:
+                else: 
                     lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
                 
                 categoria = st.selectbox("Categoria", lista_cats)
-                responsavel = st.multiselect("Para Quem?", ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"], default=["Jonathan"])
+                
+                # Múltipla Escolha para "Para Quem" (Divisão Dinâmica)
+                responsavel = st.multiselect(
+                    "Para Quem?", 
+                    ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"],
+                    default=["Jonathan"]
+                )
+                
                 forma_pagto = st.selectbox("Forma de Pagamento", ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"])
                 
                 pode_parcelar = tipo in ["Gasto Variável", "Gasto Fixo"]
@@ -350,41 +280,49 @@ with tabs[0]:
             botao_salvar = st.form_submit_button("🚀 Gravar na Planilha")
             
             if botao_salvar:
-                valor_convertido = converter_valor_para_float(valor_texto)
+                val_float = tratar_entrada_numerica(valor_texto)
+                
                 if not responsavel:
-                    st.error("Por favor, selecione pelo menos uma pessoa no campo 'Para Quem?'.")
-                elif descricao and valor_convertido > 0:
-                    valor_com_virgula = f"{valor_convertido:.2f}".replace('.', ',')
-                    responsavel_str = ", ".join(responsavel)
+                    st.error("Por favor, selecione pelo menos um responsável pelo gasto.")
+                elif descricao and val_float > 0:
+                    # Converte os responsáveis para formato string separado por vírgula para salvar no Sheets
+                    resp_salvar = ", ".join(responsavel)
+                    
+                    # CORREÇÃO CRÍTICA DE GRAVAÇÃO: Grava o valor formatado como string com VÍRGULA
+                    # O Google Sheets brasileiro vai converter isso nativamente para número decimal brasileiro perfeito
+                    valor_gravar_sheets = f"{val_float:.2f}".replace(".", ",")
                     
                     novo_registro = [
-                        str(data), descricao, valor_com_virgula, categoria, tipo, 
-                        responsavel_str, forma_pagto, parcelado, int(num_parcelas)
+                        str(data), descricao, valor_gravar_sheets, categoria, tipo, 
+                        resp_salvar, forma_pagto, parcelado, int(num_parcelas)
                     ]
                     try:
+                        # Envia os dados usando gravação tipo usuário, forçando o Sheets a converter strings de vírgula em decimais locais
                         sheet_conn.append_row(novo_registro, value_input_option='USER_ENTERED')
-                        st.success(f"Sucesso! '{descricao}' gravado com valor de {formatar_brl(valor_convertido)}.")
+                        st.success(f"Sucesso! '{descricao}' gravado na planilha com o valor de {formatar_brl(val_float)}.")
                         st.balloons()
                     except Exception as e:
                         st.error(f"Erro ao salvar na planilha: {e}")
                 else:
-                    st.error("Por favor, preencha a descrição e defina um valor válido maior que zero (use a vírgula para centavos).")
+                    st.error("Por favor, preencha a descrição e um valor decimal válido maior que zero (Exemplo: 8,99).")
 
+# INTERPRETAÇÃO E PROJEÇÃO DOS DADOS
 if sheet_conn is not None:
     try:
-        raw_data = sheet_conn.get_all_records()
-        dados_brutos = pd.DataFrame(raw_data)
-        dados_brutos = normalizar_df(dados_brutos)
+        # Lê os dados de volta do Sheets
+        dados_brutos = pd.DataFrame(sheet_conn.get_all_records())
     except Exception as e:
         dados_brutos = pd.DataFrame()
         st.warning("Aguardando lançamentos na aba 'Lancamentos' para carregar os gráficos.")
 
     if not dados_brutos.empty:
+        # Processar projeções de parcelas futuras e assinaturas automáticas em memória
         lista_projetada = []
         for index, row in dados_brutos.iterrows():
             try:
                 if not row.get('Data'):
                     continue
+                # Lê a data corrigindo strings
                 dt_compra = datetime.strptime(str(row['Data']).split()[0], "%Y-%m-%d").date()
             except Exception as parse_error:
                 try:
@@ -392,43 +330,52 @@ if sheet_conn is not None:
                 except:
                     continue
             
+            # TRATAMENTO CRÍTICO DE LEITURA DE VALORES DA PLANILHA (Evita problemas de R$ 899,00)
+            valor_raw = row.get('Valor', 0.0)
+            if isinstance(valor_raw, str):
+                # Se vier com ponto e vírgula misturados (ex: 1.250,50 ou 8,99), limpa e converte para float decimal
+                valor_total = tratar_entrada_numerica(valor_raw)
+            else:
+                # Se o pandas já leu como float direto do Sheets
+                valor_total = float(valor_raw)
+                
             tipo_lanc = row.get('Tipo', 'Gasto Variável')
             total_parc = int(row['Parcelas_Totais']) if row.get('Parcelas_Totais') else 1
-            valor_total = limpar_valor_monetario(row.get('Valor', 0.0))
             
-            responsavel_campo = str(row.get('Responsavel', 'Jonathan'))
-            responsaveis_lista = [r.strip() for r in responsavel_campo.replace('/', ',').split(',') if r.strip()]
-            if not responsaveis_lista:
-                responsaveis_lista = ["Jonathan"]
+            # Divide o gasto proporcionalmente se houver múltiplos responsáveis (ex: "Jonathan, Bruna")
+            resp_raw = str(row.get('Responsavel', 'Jonathan'))
+            responsaveis_list = [r.strip() for r in resp_raw.split(",") if r.strip()]
+            if not responsaveis_list:
+                responsaveis_list = ["Jonathan"]
             
-            num_responsaveis = len(responsaveis_lista)
+            divisao_pessoas = len(responsaveis_list)
             
+            # Se for assinatura, o valor se repete mensalmente. Vamos projetar para os próximos 12 meses
             if tipo_lanc == "Assinatura":
-                val_dividido = valor_total / num_responsaveis
                 for m in range(12):
                     dt_recorrente = dt_compra + relativedelta(months=m)
                     mes_competencia = calcular_mes_competencia(dt_recorrente, row.get('Forma_Pagamento', 'Dinheiro'))
                     
-                    for r_individual in responsaveis_lista:
+                    # Cria um registro dividido proporcionalmente para cada pessoa do multiselect
+                    for resp in responsaveis_list:
                         item_proj = row.to_dict()
                         item_proj['Mes_Fatura'] = mes_competencia
-                        item_proj['Valor_Parcela'] = val_dividido
-                        item_proj['Responsavel'] = r_individual
+                        item_proj['Valor_Parcela'] = valor_total / divisao_pessoas
+                        item_proj['Responsavel_Dividido'] = resp
                         item_proj['Parcela_Atual'] = "Recorrente"
                         lista_projetada.append(item_proj)
             else:
+                # Compras normais e parceladas
                 val_parcela = valor_total / total_parc if row.get('Parcelado') == 'Sim' else valor_total
-                val_dividido = val_parcela / num_responsaveis
-                
                 for p in range(total_parc):
                     dt_parcela = dt_compra + relativedelta(months=p)
                     mes_competencia = calcular_mes_competencia(dt_parcela, row.get('Forma_Pagamento', 'Dinheiro'))
                     
-                    for r_individual in responsaveis_lista:
+                    for resp in responsaveis_list:
                         item_proj = row.to_dict()
                         item_proj['Mes_Fatura'] = mes_competencia
-                        item_proj['Valor_Parcela'] = val_dividido
-                        item_proj['Responsavel'] = r_individual
+                        item_proj['Valor_Parcela'] = val_parcela / divisao_pessoas
+                        item_proj['Responsavel_Dividido'] = resp
                         item_proj['Parcela_Atual'] = f"{p+1}/{total_parc}" if row.get('Parcelado') == 'Sim' else "1/1"
                         lista_projetada.append(item_proj)
                 
@@ -436,6 +383,7 @@ if sheet_conn is not None:
             df_projetado = pd.DataFrame(lista_projetada)
             df_projetado['Valor_Parcela'] = df_projetado['Valor_Parcela'].astype(float)
             
+            # Traduzir a exibição da coluna de datas para formato brasileiro (DD/MM/YYYY)
             def formatar_data_br(data_str):
                 try:
                     dt = datetime.strptime(str(data_str).split()[0], "%Y-%m-%d")
@@ -445,6 +393,7 @@ if sheet_conn is not None:
             
             df_projetado['Data_Exibicao'] = df_projetado['Data'].apply(formatar_data_br)
             
+            # TAB 2: DASHBOARD
             with tabs[1]:
                 st.subheader("Resumo Mensal e Faturas")
                 
@@ -454,205 +403,199 @@ if sheet_conn is not None:
                     idx_padrao = meses_disponiveis.index(mes_atual_padrao) if mes_atual_padrao in meses_disponiveis else len(meses_disponiveis)-1
                     
                     mes_selecionado = st.selectbox("Selecione o Mês de Análise", meses_disponiveis, index=idx_padrao)
+                    
                     df_mes = df_projetado[df_projetado['Mes_Fatura'] == mes_selecionado]
                     
-                    # KPIs em memória
+                    # KPIs Principais do Mês Selecionado
                     tot_entradas = df_mes[df_mes['Tipo'] == 'Entrada']['Valor_Parcela'].sum()
                     tot_saidas = df_mes[df_mes['Tipo'] != 'Entrada']['Valor_Parcela'].sum()
+                    
+                    # Faturas Cartões (Regra Fechamento Dia 07 aplicada)
                     fatura_nu = df_mes[df_mes['Forma_Pagamento'] == 'Cartão Nu']['Valor_Parcela'].sum()
                     fatura_bb = df_mes[df_mes['Forma_Pagamento'] == 'Cartão BB']['Valor_Parcela'].sum()
+                    
                     saldo_final = tot_entradas - tot_saidas
                     
-                    # Renderizando os KPI Cards customizados com gradientes e sombras físicas no HTML
-                    st.markdown(f"""
-                    <div class="kpi-grid">
-                        <div class="kpi-card gradient-entradas animate-card">
-                            <div class="kpi-label">🟢 Total Entradas</div>
+                    # BLOCOS DE KPI MODERNOS (GRADIENTE, SOMBRA, HOVER)
+                    kpi_c1, kpi_c2, kpi_c3, kpi_c4 = st.columns(4)
+                    
+                    with kpi_c1:
+                        st.markdown(f"""
+                        <div class="kpi-container kpi-entradas">
+                            <div class="kpi-title">🟢 Total Entradas</div>
                             <div class="kpi-value">{formatar_brl(tot_entradas)}</div>
-                            <div class="kpi-sub">Receitas consolidadas</div>
+                            <div class="kpi-subtitle">Salários & Receitas</div>
                         </div>
-                        <div class="kpi-card gradient-despesas animate-card" style="animation-delay: 100ms;">
-                            <div class="kpi-label">🔴 Total Despesas</div>
-                            <div class="kpi-value">{formatar_brl(tot_saidas)}</div>
-                            <div class="kpi-sub">Sobrou: {formatar_brl(saldo_final)}</div>
-                        </div>
-                        <div class="kpi-card gradient-nu animate-card" style="animation-delay: 200ms;">
-                            <div class="kpi-label">💳 Fatura Nu Bank</div>
-                            <div class="kpi-value">{formatar_brl(fatura_nu)}</div>
-                            <div class="kpi-sub">Vencimento estimado</div>
-                        </div>
-                        <div class="kpi-card gradient-bb animate-card" style="animation-delay: 300ms;">
-                            <div class="kpi-label">💳 Fatura BB</div>
-                            <div class="kpi-value">{formatar_brl(fatura_bb)}</div>
-                            <div class="kpi-sub">Vencimento estimado</div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.markdown("### 📊 Gráficos de Análise e Distribuição")
-                    
-                    # Coluna de gráficos principais
-                    col_g1, col_g2 = st.columns(2)
-                    
-                    # Gráfico Donut de Despesas por Categoria (Com Total no Centro)
-                    with col_g1:
-                        st.markdown("<h5 style='text-align: center; color: #4b5563; margin-bottom: 1rem;'>Despesas por Categoria</h5>", unsafe_allow_html=True)
-                        df_cat = df_mes[df_mes['Tipo'] != 'Entrada'].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
+                        """, unsafe_allow_html=True)
                         
-                        if not df_cat.empty:
-                            fig_donut = go.Figure(data=[go.Pie(
-                                labels=df_cat['Categoria'], 
-                                values=df_cat['Valor_Parcela'], 
-                                hole=0.6,
-                                marker=dict(colors=['#4f46e5', '#10b981', '#6366f1', '#34d399', '#4338ca', '#059669', '#312e81', '#a7f3d0']),
-                                hovertemplate="<b>%{label}</b><br>Gasto: R$ %{value:,.2f}<br>Representação: %{percent}<extra></extra>"
-                            )])
-                            
-                            fig_donut.add_annotation(
-                                text=f"Total Gastos<br><span style='font-size: 1.1rem; font-weight: 800; color: #1e293b;'>{formatar_brl(tot_saidas)}</span>",
-                                showarrow=False,
-                                font=dict(size=12, color="#4b5563"),
-                                align="center"
+                    with kpi_c2:
+                        st.markdown(f"""
+                        <div class="kpi-container kpi-saidas">
+                            <div class="kpi-title">🔴 Total Despesas</div>
+                            <div class="kpi-value">{formatar_brl(tot_saidas)}</div>
+                            <div class="kpi-subtitle">Balanço: {formatar_brl(saldo_final)} sobrou</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                    with kpi_c3:
+                        st.markdown(f"""
+                        <div class="kpi-container kpi-nu">
+                            <div class="kpi-title">💳 Fatura Nu Bank</div>
+                            <div class="kpi-value">{formatar_brl(fatura_nu)}</div>
+                            <div class="kpi-subtitle">Fecha no Dia 07</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                    with kpi_c4:
+                        st.markdown(f"""
+                        <div class="kpi-container kpi-bb">
+                            <div class="kpi-title">💳 Fatura BB</div>
+                            <div class="kpi-value">{formatar_brl(fatura_bb)}</div>
+                            <div class="kpi-subtitle">Vence nos próximos dias</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    st.write("---")
+                    
+                    # SEÇÃO DE GRÁFICOS INTERATIVOS PLOTLY (Paleta Emerald/Indigo)
+                    st.markdown("### Visualização de Distribuição e Análise")
+                    
+                    g_col1, g_col2 = st.columns(2)
+                    
+                    with g_col1:
+                        st.markdown("**Gastos por Categoria (Donut Chart com Total)**")
+                        df_gasto_cat = df_mes[df_mes['Tipo'] != 'Entrada'].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
+                        
+                        if not df_gasto_cat.empty:
+                            total_gastos = df_gasto_cat['Valor_Parcela'].sum()
+                            fig_donut = px.pie(
+                                df_gasto_cat, 
+                                values='Valor_Parcela', 
+                                names='Categoria', 
+                                hole=0.5,
+                                color_discrete_sequence=px.colors.sequential.Emerald_r + px.colors.sequential.Indigo_r
                             )
-                            
+                            fig_donut.update_traces(
+                                textinfo='percent+label',
+                                hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:,.2f}<br>Representa: %{percent}<extra></extra>"
+                            )
+                            # Adiciona o total no centro do donut
+                            fig_donut.add_annotation(
+                                text=f"Total<br><b>R$ {total_gastos:,.2f}</b>",
+                                showarrow=False,
+                                font_size=16,
+                                font_color="#1e1b4b"
+                            )
                             fig_donut.update_layout(
                                 margin=dict(t=10, b=10, l=10, r=10),
-                                height=320,
-                                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-                                paper_bgcolor='rgba(0,0,0,0)',
-                                plot_bgcolor='rgba(0,0,0,0)'
+                                showlegend=False,
+                                height=350
                             )
                             st.plotly_chart(fig_donut, use_container_width=True)
                         else:
-                            st.info("Sem despesas para exibir o donut neste mês.")
+                            st.info("Nenhum gasto registrado para gerar gráfico de rosca.")
                             
-                    # Gráfico de Barras Horizontais por Destinatário (BRL nos rótulos)
-                    with col_g2:
-                        st.markdown("<h5 style='text-align: center; color: #4b5563; margin-bottom: 1rem;'>Distribuição por Destinatário</h5>", unsafe_allow_html=True)
-                        df_resp = df_mes[df_mes['Tipo'] != 'Entrada'].groupby('Responsavel')['Valor_Parcela'].sum().reset_index()
+                    with g_col2:
+                        st.markdown("**Balanço de Gastos Dividido (Barras Horizontais em R$)**")
+                        # Gráfico usa a coluna "Responsavel_Dividido" para computar as proporções corretas pós-divisão
+                        df_gasto_resp = df_mes[df_mes['Tipo'] != 'Entrada'].groupby('Responsavel_Dividido')['Valor_Parcela'].sum().reset_index()
                         
-                        if not df_resp.empty:
-                            df_resp = df_resp.sort_values(by='Valor_Parcela', ascending=True)
-                            
-                            fig_bar = go.Figure(go.Bar(
-                                x=df_resp['Valor_Parcela'],
-                                y=df_resp['Responsavel'],
+                        if not df_gasto_resp.empty:
+                            fig_barras = px.bar(
+                                df_gasto_resp,
+                                x='Valor_Parcela',
+                                y='Responsavel_Dividido',
                                 orientation='h',
-                                marker=dict(
-                                    color=df_resp['Valor_Parcela'],
-                                    colorscale=[[0, '#6366f1'], [1, '#10b981']],
-                                    line=dict(color='rgba(255,255,255,0.5)', width=1)
-                                ),
-                                text=[formatar_brl(v) for v in df_resp['Valor_Parcela']],
-                                textposition='auto',
-                                hovertemplate="<b>%{y}</b><br>Valor Total: R$ %{x:,.2f}<extra></extra>"
-                            ))
-                            
-                            fig_bar.update_layout(
-                                margin=dict(t=10, b=10, l=10, r=10),
-                                height=320,
-                                paper_bgcolor='rgba(0,0,0,0)',
-                                plot_bgcolor='rgba(0,0,0,0)',
-                                xaxis=dict(showgrid=True, gridcolor='rgba(229,231,235,0.5)', showticklabels=False),
-                                yaxis=dict(gridcolor='rgba(0,0,0,0)')
+                                text='Valor_Parcela',
+                                color='Valor_Parcela',
+                                color_continuous_scale=['#a78bfa', '#312e81'] # Tons de Indigo
                             )
-                            st.plotly_chart(fig_bar, use_container_width=True)
+                            fig_barras.update_traces(
+                                texttemplate='R$ %{text:,.2f}', 
+                                textposition='outside',
+                                hovertemplate="<b>%{y}</b><br>Gasto proporcional: R$ %{x:,.2f}<extra></extra>"
+                            )
+                            fig_barras.update_layout(
+                                xaxis_title="Gasto Total Proporcional",
+                                yaxis_title="Destinatário",
+                                coloraxis_showscale=False,
+                                margin=dict(t=10, b=10, l=10, r=10),
+                                height=350
+                            )
+                            st.plotly_chart(fig_barras, use_container_width=True)
                         else:
-                            st.info("Sem dados de destinatários neste mês.")
+                            st.info("Sem dados de despesa para exibir no balanço.")
                     
                     st.write("---")
                     
-                    # Gráfico de Evolução Mensal (Linhas: Entradas vs Despesas)
-                    st.markdown("<h5 style='color: #4b5563; margin-bottom: 1.5rem;'>📈 Evolução Mensal (Entradas vs Despesas)</h5>", unsafe_allow_html=True)
-                    df_evolucao = df_projetado.groupby(['Mes_Fatura', 'Tipo'])['Valor_Parcela'].sum().unstack().fillna(0).reset_index()
+                    # GRÁFICO 3: EVOLUÇÃO MENSAL (LINHAS ENTRADAS VS DESPESAS)
+                    st.markdown("**Histórico de Evolução Mensal (Entradas vs Despesas)**")
                     
-                    # Garante a coluna Entrada caso não exista
-                    if 'Entrada' not in df_evolucao.columns:
-                        df_evolucao['Entrada'] = 0.0
-                    
-                    # Soma todas as colunas que NÃO são 'Entrada' nem 'Mes_Fatura' para termos as saídas consolidadas
-                    cols_despesa = [c for c in df_evolucao.columns if c not in ['Mes_Fatura', 'Entrada']]
-                    df_evolucao['Saidas'] = df_evolucao[cols_despesa].sum(axis=1)
+                    # Puxa dados agrupados por mês de competência de faturas e tipos
+                    df_evolucao = df_projetado.groupby(['Mes_Fatura', 'Tipo'])['Valor_Parcela'].sum().unstack(fill_value=0.0).reset_index()
                     
                     if not df_evolucao.empty:
-                        fig_line = go.Figure()
+                        # Garante que as colunas existam
+                        if 'Entrada' not in df_evolucao.columns: df_evolucao['Entrada'] = 0.0
                         
-                        fig_line.add_trace(go.Scatter(
-                            x=df_evolucao['Mes_Fatura'],
+                        # Soma todas as despesas que não sejam Entradas
+                        colunas_despesas = [c for c in df_evolucao.columns if c != 'Mes_Fatura' and c != 'Entrada']
+                        df_evolucao['Total_Despesas'] = df_evolucao[colunas_despesas].sum(axis=1)
+                        
+                        fig_linhas = go.Figure()
+                        # Linha de Entradas
+                        fig_linhas.add_trace(go.Scatter(
+                            x=df_evolucao['Mes_Fatura'], 
                             y=df_evolucao['Entrada'],
-                            name="Entradas (Receitas)",
-                            line=dict(color='#4f46e5', width=3, shape='spline'),
+                            name='🟢 Entradas (Receitas)',
+                            line=dict(color='#10b981', width=3),
                             mode='lines+markers',
-                            marker=dict(size=8, color='#4f46e5'),
-                            hovertemplate="Mês: %{x}<br>Entrada: R$ %{y:,.2f}<extra></extra>"
+                            hovertemplate="Mês: %{x}<br>Receitas: R$ %{y:,.2f}<extra></extra>"
                         ))
-                        
-                        fig_line.add_trace(go.Scatter(
-                            x=df_evolucao['Mes_Fatura'],
-                            y=df_evolucao['Saidas'],
-                            name="Saídas (Despesas)",
-                            line=dict(color='#10b981', width=3, shape='spline'),
+                        # Linha de Despesas
+                        fig_linhas.add_trace(go.Scatter(
+                            x=df_evolucao['Mes_Fatura'], 
+                            y=df_evolucao['Total_Despesas'],
+                            name='🔴 Despesas (Gastos)',
+                            line=dict(color='#6366f1', width=3),
                             mode='lines+markers',
-                            marker=dict(size=8, color='#10b981'),
-                            hovertemplate="Mês: %{x}<br>Despesa: R$ %{y:,.2f}<extra></extra>"
+                            hovertemplate="Mês: %{x}<br>Despesas: R$ %{y:,.2f}<extra></extra>"
                         ))
                         
-                        fig_line.update_layout(
-                            margin=dict(t=10, b=10, l=10, r=10),
-                            height=300,
-                            legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5),
-                            paper_bgcolor='rgba(0,0,0,0)',
-                            plot_bgcolor='rgba(0,0,0,0)',
-                            xaxis=dict(showgrid=True, gridcolor='rgba(229,231,235,0.5)'),
-                            yaxis=dict(showgrid=True, gridcolor='rgba(229,231,235,0.5)', tickprefix="R$ ")
+                        fig_linhas.update_layout(
+                            margin=dict(t=20, b=20, l=10, r=10),
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                            height=300
                         )
-                        st.plotly_chart(fig_line, use_container_width=True)
+                        st.plotly_chart(fig_linhas, use_container_width=True)
                     
-                    st.write("---")
-                    
-                    # Heatmap de Categorias vs Meses (Matriz de calor de custos)
-                    st.markdown("<h5 style='color: #4b5563; margin-bottom: 1.5rem;'>🔥 Calor de Custos por Categoria</h5>", unsafe_allow_html=True)
-                    df_g_varias = df_projetado[df_projetado['Tipo'] != 'Entrada']
-                    
-                    if not df_g_varias.empty:
-                        pivot_heatmap = df_g_varias.pivot_table(
-                            index='Categoria', 
-                            columns='Mes_Fatura', 
-                            values='Valor_Parcela', 
-                            aggfunc='sum'
-                        ).fillna(0)
-                        
-                        fig_heat = go.Figure(data=go.Heatmap(
-                            z=pivot_heatmap.values,
-                            x=pivot_heatmap.columns,
-                            y=pivot_heatmap.index,
-                            colorscale=[[0, '#f9fafb'], [0.5, '#a5b4fc'], [1, '#059669']],
-                            hovertemplate="Mês: %{x}<br>Categoria: %{y}<br>Consumo: R$ %{z:,.2f}<extra></extra>",
-                            showscale=True
-                        ))
-                        
-                        fig_heat.update_layout(
-                            margin=dict(t=10, b=10, l=10, r=10),
-                            height=340,
-                            paper_bgcolor='rgba(0,0,0,0)',
-                            plot_bgcolor='rgba(0,0,0,0)'
-                        )
-                        st.plotly_chart(fig_heat, use_container_width=True)
-                        
                     st.write("---")
                     
                     st.markdown("**Extrato Detalhado do Mês de Competência**")
-                    df_mes_exibe = df_mes[['Data_Exibicao', 'Descricao', 'Valor_Parcela', 'Parcela_Atual', 'Categoria', 'Responsavel', 'Forma_Pagamento', 'Tipo']].copy()
-                    df_mes_exibe.rename(columns={'Data_Exibicao': 'Data', 'Valor_Parcela': 'Valor da Parcela (R$)'}, inplace=True)
-                    df_mes_exibe['Valor da Parcela (R$)'] = df_mes_exibe['Valor da Parcela (R$)'].apply(formatar_brl)
+                    # Para a tabela, agrupamos de volta a visualização física das linhas originais (sem duplicar por responsável)
+                    # mas exibindo a divisão de forma amigável
+                    df_mes_tabela = df_mes.drop_duplicates(subset=['Data', 'Descricao', 'Valor', 'Categoria', 'Forma_Pagamento', 'Parcela_Atual'])
+                    
+                    df_mes_exibe = df_mes_tabela[['Data_Exibicao', 'Descricao', 'Valor', 'Parcela_Atual', 'Categoria', 'Responsavel', 'Forma_Pagamento', 'Tipo']].copy()
+                    df_mes_exibe.rename(columns={'Data_Exibicao': 'Data', 'Valor': 'Valor Total (R$)'}, inplace=True)
+                    
+                    # Formata coluna valor da tabela para BRL
+                    def formatar_valor_tabela(val):
+                        # Converte string de vírgula para exibir de forma polida
+                        f = tratar_entrada_numerica(val)
+                        return formatar_brl(f)
+                    df_mes_exibe['Valor Total (R$)'] = df_mes_exibe['Valor Total (R$)'].apply(formatar_valor_tabela)
+                    
                     st.dataframe(df_mes_exibe, use_container_width=True)
                 else:
                     st.info("Nenhum mês disponível para análise.")
 
+            # TAB 3: CONTROLE DE PARCELAS ACUMULADAS E ASSINATURAS
             with tabs[2]:
                 st.subheader("Dívidas Parceladas e Controle de Assinaturas")
                 
                 hoje_str = date.today().strftime("%Y-%m")
+                
                 df_futuro = df_projetado[(df_projetado['Mes_Fatura'] > hoje_str) & (df_projetado['Parcelado'] == 'Sim')]
                 saldo_devedor_futuro = df_futuro['Valor_Parcela'].sum()
                 
@@ -663,9 +606,14 @@ if sheet_conn is not None:
                 with col_esquerda:
                     st.markdown("### 💳 Cronograma de Parcelamentos")
                     if not df_futuro.empty:
+                        # Agrupa para pivotar sem dar erro de duplicatas
                         cronograma = df_futuro.groupby(['Mes_Fatura', 'Forma_Pagamento'])['Valor_Parcela'].sum().unstack().fillna(0)
-                        cronograma_brl = cronograma.applymap(formatar_brl)
-                        st.dataframe(cronograma_brl, use_container_width=True)
+                        
+                        # Aplica formatação BRL amigável para as colunas do cronograma
+                        for col in cronograma.columns:
+                            cronograma[col] = cronograma[col].apply(formatar_brl)
+                        
+                        st.dataframe(cronograma, use_container_width=True)
                         
                         st.markdown("**Detalhe das Parcelas Futuras**")
                         df_futuro_exibe = df_futuro[['Mes_Fatura', 'Descricao', 'Valor_Parcela', 'Parcela_Atual', 'Forma_Pagamento']].copy()
@@ -680,148 +628,144 @@ if sheet_conn is not None:
                     if not df_assinaturas.empty:
                         tot_mensal_ass = df_assinaturas['Valor_Parcela'].sum()
                         st.success(f"📋 **Custo Mensal de Assinaturas:** {formatar_brl(tot_mensal_ass)}")
-                        df_assinaturas_exibe = df_assinaturas[['Descricao', 'Valor_Parcela', 'Categoria', 'Forma_Pagamento']].copy()
-                        df_assinaturas_exibe['Valor_Parcela'] = df_assinaturas_exibe['Valor_Parcela'].apply(formatar_brl)
-                        st.dataframe(df_assinaturas_exibe, use_container_width=True)
+                        
+                        df_ass_exibe = df_assinaturas[['Descricao', 'Valor_Parcela', 'Categoria', 'Forma_Pagamento']].copy()
+                        df_ass_exibe['Valor_Parcela'] = df_ass_exibe['Valor_Parcela'].apply(formatar_brl)
+                        st.dataframe(df_ass_exibe, use_container_width=True)
                     else:
                         st.info("Nenhuma assinatura cadastrada.")
 
+            # TAB 4: EDITAR E CORRIGIR LANÇAMENTOS (CORREÇÃO DE VALORES VELHOS)
             with tabs[3]:
-                st.subheader("✏️ Alterar ou Excluir Lançamentos")
-                st.markdown("Se digitou alguma informação incorreta ou deseja excluir um registro da planilha, ajuste os campos abaixo:")
+                st.subheader("Corrigir ou Apagar Lançamentos")
+                st.markdown("Selecione um lançamento da lista para editar os valores ou apagá-los definitivamente da planilha.")
                 
-                lista_ajustavel = []
-                for idx, row in dados_brutos.iterrows():
-                    num_linha = idx + 2
-                    desc = row.get('Descricao', 'Sem Descrição')
-                    val = limpar_valor_monetario(row.get('Valor', 0.0))
-                    dt = row.get('Data', '')
+                # Para editar, mostramos as linhas físicas puras da planilha para não misturar as projeções de parcelas
+                df_editor = dados_brutos.copy()
+                
+                if not df_editor.empty:
+                    # Inverte a ordem para que os lançamentos mais recentes fiquem no topo da lista
+                    df_editor = df_editor.iloc[::-1].reset_index(drop=True)
                     
-                    rotulo = f"Linha {num_linha} | {dt} | {desc} - {formatar_brl(val)}"
-                    lista_ajustavel.append({"linha": num_linha, "label": rotulo, "original": row.to_dict()})
-                
-                lista_ajustavel.reverse()
-                
-                if lista_ajustavel:
-                    registro_selecionado = st.selectbox(
-                        "Selecione o Lançamento para Corrigir:",
-                        options=lista_ajustavel,
-                        format_func=lambda x: x["label"]
-                    )
+                    # Cria um campo textual de identificação amigável para a lista de escolha
+                    def gerar_linha_opcao(row):
+                        data_formatada = formatar_data_br(row.get('Data', ''))
+                        v_float = tratar_entrada_numerica(row.get('Valor', 0.0))
+                        v_brl = formatar_brl(v_float)
+                        return f"{data_formatada} | {row.get('Descricao', 'Sem Descrição')} | {v_brl} ({row.get('Forma_Pagamento', 'Pix')})"
                     
-                    if registro_selecionado:
-                        orig = registro_selecionado["original"]
-                        linha_planilha = registro_selecionado["linha"]
+                    df_editor['Identificacao_Opcao'] = df_editor.apply(gerar_linha_opcao, axis=1)
+                    
+                    selecao = st.selectbox("Selecione qual item quer alterar ou excluir:", df_editor['Identificacao_Opcao'])
+                    
+                    if selecao:
+                        # Recupera a linha selecionada
+                        item_selecionado = df_editor[df_editor['Identificacao_Opcao'] == selecao].iloc[0]
                         
-                        st.write("---")
-                        with st.form("form_edicao_registro"):
-                            st.markdown(f"**Editando dados da Linha {linha_planilha}**")
-                            col_ed1, col_ed2 = st.columns(2)
-                            
-                            with col_ed1:
-                                try:
-                                    dt_orig = datetime.strptime(str(orig.get('Data')).split()[0], "%Y-%m-%d").date()
-                                except:
-                                    try:
-                                        dt_orig = datetime.strptime(str(orig.get('Data')).split()[0], "%d/%m/%Y").date()
-                                    except:
-                                        dt_orig = date.today()
-                                
-                                ed_data = st.date_input("Data do Lançamento", dt_orig, format="DD/MM/YYYY")
-                                ed_descricao = st.text_input("Descrição", value=orig.get('Descricao', ''))
-                                
-                                valor_original_texto = f"{limpar_valor_monetario(orig.get('Valor', 0.0)):.2f}".replace('.', ',')
-                                ed_valor_texto = st.text_input("Valor (R$)", value=valor_original_texto, placeholder="Ex: 12,90")
-                                
-                                tipo_orig = orig.get('Tipo', 'Gasto Variável')
-                                lista_tipos_sup = ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"]
-                                idx_tipo_orig = lista_tipos_sup.index(tipo_orig) if tipo_orig in lista_tipos_sup else 0
-                                ed_tipo = st.selectbox("Tipo de Lançamento", lista_tipos_sup, index=idx_tipo_orig)
-                                
-                            with col_ed2:
-                                if ed_tipo == "Gasto Fixo":
-                                    lista_cats_ed = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
-                                elif ed_tipo == "Gasto Variável":
-                                    lista_cats_ed = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
-                                elif ed_tipo == "Assinatura":
-                                    lista_cats_ed = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
-                                else:
-                                    lista_cats_ed = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
-                                
-                                cat_orig = orig.get('Categoria', '')
-                                idx_cat_ed = lista_cats_ed.index(cat_orig) if cat_orig in lista_cats_ed else 0
-                                ed_categoria = st.selectbox("Categoria", lista_cats_ed, index=idx_cat_ed)
-                                
-                                resp_orig_str = str(orig.get('Responsavel', 'Jonathan'))
-                                resp_orig_lista = [r.strip() for r in resp_orig_str.replace('/', ',').split(',') if r.strip()]
-                                if not resp_orig_lista:
-                                    resp_orig_lista = ["Jonathan"]
-                                
-                                ed_responsavel = st.multiselect("Para Quem?", ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"], default=resp_orig_lista)
-                                
-                                pgto_orig = orig.get('Forma_Pagamento', 'Cartão Nu')
-                                lista_pgto_ed = ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"]
-                                idx_pgto_ed = lista_pgto_ed.index(pgto_orig) if pgto_orig in lista_pgto_ed else 0
-                                ed_forma_pagto = st.selectbox("Forma de Pagamento", lista_pgto_ed, index=idx_pgto_ed)
-                                
-                                pode_parcelar_ed = ed_tipo in ["Gasto Variável", "Gasto Fixo"]
-                                if pode_parcelar_ed:
-                                    parc_orig = orig.get('Parcelado', 'Não')
-                                    idx_parc_ed = 0 if parc_orig == "Não" else 1
-                                    ed_parcelado = st.radio("Compra Parcelada?", ["Não", "Sim"], index=idx_parc_ed, horizontal=True)
-                                    
-                                    try:
-                                        tot_parc_orig = int(orig.get('Parcelas_Totais', 1))
-                                    except:
-                                        tot_parc_orig = 1
-                                    
-                                    if ed_parcelado == "Sim":
-                                        ed_num_parcelas = st.number_input("Quantidade de Parcelas", min_value=2, max_value=48, value=max(2, tot_parc_orig), step=1)
-                                    else:
-                                        ed_num_parcelas = 1
-                                else:
-                                    ed_parcelado = "Não"
-                                    ed_num_parcelas = 1
-                                    
-                            botao_atualizar = st.form_submit_button("💾 Salvar Alterações")
-                            
-                            if botao_atualizar:
-                                ed_valor_float = converter_valor_para_float(ed_valor_texto)
-                                if not ed_responsavel:
-                                    st.error("Selecione ao menos um responsável no campo 'Para Quem?'.")
-                                elif ed_descricao and ed_valor_float > 0:
-                                    ed_valor_com_virgula = f"{ed_valor_float:.2f}".replace('.', ',')
-                                    ed_responsavel_str = ", ".join(ed_responsavel)
-                                    
-                                    valores_atualizados = [
-                                        str(ed_data), ed_descricao, ed_valor_com_virgula, ed_categoria, ed_tipo,
-                                        ed_responsavel_str, ed_forma_pagto, ed_parcelado, int(ed_num_parcelas)
-                                    ]
-                                    try:
-                                        sheet_conn.update(f"A{linha_planilha}:I{linha_planilha}", [valores_atualizados], value_input_option='USER_ENTERED')
-                                        st.success(f"Excelente! Linha {linha_planilha} atualizada com sucesso.")
-                                        st.balloons()
-                                        st.rerun()
-                                    except Exception as ex:
-                                        st.error(f"Erro ao atualizar planilha: {ex}")
-                                else:
-                                    st.error("Preencha todos os campos obrigatórios.")
+                        # Encontra o índice da linha física real na planilha gspread (considerando cabeçalho na linha 1)
+                        # Como invertemos o DataFrame: index_gspread = len(dados_brutos) - index_reverso + 1
+                        idx_dataframe = df_editor[df_editor['Identificacao_Opcao'] == selecao].index[0]
+                        linha_planilha_real = (len(dados_brutos) - idx_dataframe) + 1  # Soma 1 pelo cabeçalho
                         
-                        st.markdown("---")
-                        st.markdown("### ⚠️ Zona de Perigo (Excluir Permanentemente)")
-                        st.write("Marque a caixa de verificação abaixo caso queira remover este registro do seu banco de dados:")
-                        confirma_exclusao = st.checkbox(f"Confirmo que desejo apagar para sempre o registro da Linha {linha_planilha}.")
-                        
-                        if st.button("🗑️ Excluir Lançamento", type="primary", disabled=not confirma_exclusao):
+                        # Carrega os dados para o formulário de edição
+                        try:
+                            data_item = datetime.strptime(str(item_selecionado['Data']).split()[0], "%Y-%m-%d").date()
+                        except:
                             try:
-                                sheet_conn.delete_rows(linha_planilha)
-                                st.success(f"O registro da Linha {linha_planilha} foi excluído da planilha.")
+                                data_item = datetime.strptime(str(item_selecionado['Data']).split()[0], "%d/%m/%Y").date()
+                            except:
+                                data_item = date.today()
+                        
+                        # Formata o valor bruto antigo para o padrão textual BR para facilitar a digitação corretiva
+                        valor_antigo_float = tratar_entrada_numerica(item_selecionado['Valor'])
+                        valor_antigo_br = f"{valor_antigo_float:.2f}".replace(".", ",")
+                        
+                        # Tratamento de pessoas no multiselect
+                        resp_item_raw = str(item_selecionado.get('Responsavel', 'Jonathan'))
+                        resp_item_lista = [r.strip() for r in resp_item_raw.split(",") if r.strip()]
+                        
+                        st.markdown(f"📍 **Editando Linha {linha_planilha_real} da planilha:**")
+                        
+                        with st.form("form_edicao"):
+                            e_col1, e_col2 = st.columns(2)
+                            with e_col1:
+                                e_data = st.date_input("Nova Data", data_item, format="DD/MM/YYYY")
+                                e_desc = st.text_input("Nova Descrição", value=item_selecionado['Descricao'])
+                                e_valor_texto = st.text_input("Corrigir Valor (R$)", value=valor_antigo_br, help="Digite o valor correto usando vírgula.")
+                                e_tipo = st.selectbox(
+                                    "Novo Tipo", 
+                                    ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"],
+                                    index=["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"].index(item_selecionado['Tipo'])
+                                )
+                            with e_col2:
+                                if e_tipo == "Gasto Fixo":
+                                    e_lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
+                                elif e_tipo == "Gasto Variável":
+                                    e_lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
+                                elif e_tipo == "Assinatura":
+                                    e_lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
+                                else: 
+                                    e_lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
+                                
+                                idx_cat_edicao = e_lista_cats.index(item_selecionado['Categoria']) if item_selecionado['Categoria'] in e_lista_cats else 0
+                                e_cat = st.selectbox("Nova Categoria", e_lista_cats, index=idx_cat_edicao)
+                                
+                                e_resp = st.multiselect(
+                                    "Novos Responsáveis", 
+                                    ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"],
+                                    default=resp_item_lista
+                                )
+                                
+                                e_forma = st.selectbox(
+                                    "Nova Forma de Pagamento", 
+                                    ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"],
+                                    index=["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"].index(item_selecionado['Forma_Pagamento'])
+                                )
+                                
+                                e_parcelado = item_selecionado.get('Parcelado', 'Não')
+                                e_tot_parc = int(item_selecionado.get('Parcelas_Totais', 1))
+                                
+                            btn_atualizar = st.form_submit_button("💾 Salvar Alterações")
+                            
+                            if btn_atualizar:
+                                val_novo_float = tratar_entrada_numerica(e_valor_texto)
+                                
+                                if not e_resp:
+                                    st.error("Selecione pelo menos um responsável.")
+                                elif e_desc and val_novo_float > 0:
+                                    # Cria array atualizado
+                                    resp_ed_salvar = ", ".join(e_resp)
+                                    valor_ed_gravar = f"{val_novo_float:.2f}".replace(".", ",")
+                                    
+                                    linha_atualizada = [
+                                        str(e_data), e_desc, valor_ed_gravar, e_cat, e_tipo, 
+                                        resp_ed_salvar, e_forma, e_parcelado, e_tot_parc
+                                    ]
+                                    
+                                    try:
+                                        # Substitui a linha antiga diretamente na planilha usando gravação em formato brasileiro
+                                        # O gspread usa índices que começam em 1, por isso a correspondência é direta
+                                        sheet_conn.update(f"A{linha_planilha_real}:I{linha_planilha_real}", [linha_atualizada], value_input_option='USER_ENTERED')
+                                        st.success("Lançamento atualizado com sucesso! Reiniciando visualização...")
+                                        st.rerun()
+                                    except Exception as err:
+                                        st.error(f"Erro ao salvar modificação: {err}")
+                        
+                        # EXCLUSÃO (Zona de Perigo)
+                        st.markdown("---")
+                        st.markdown("### ⚠️ Zona de Perigo")
+                        confirmar_exclusao = st.checkbox("Eu quero excluir permanentemente este lançamento da minha planilha.")
+                        btn_excluir = st.button("❌ APAGAR DEFINITIVAMENTE", disabled=not confirmar_exclusao, type="secondary")
+                        
+                        if btn_excluir and confirmar_exclusao:
+                            try:
+                                # Deleta a linha exata da planilha
+                                sheet_conn.delete_rows(linha_planilha_real)
+                                st.success("Lançamento apagado da planilha!")
                                 st.rerun()
-                            except Exception as ex:
-                                st.error(f"Erro ao excluir o registro: {ex}")
+                            except Exception as err:
+                                st.error(f"Erro ao apagar linha: {err}")
                 else:
-                    st.info("Nenhum lançamento foi encontrado para editar.")
-        else:
-            st.info("Sem dados projetados disponíveis.")
-    else:
-        st.info("Sua planilha na aba 'Lancamentos' está vazia. Faça o primeiro lançamento na aba 'Novo Lançamento' acima para começar!")
+                    st.info("A planilha está vazia.")
+else:
+    st.info("Aguardando os primeiros dados da planilha para renderizar os gráficos.")
