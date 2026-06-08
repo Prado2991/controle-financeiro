@@ -128,16 +128,27 @@ def formatar_brl(valor):
 
 # FUNÇÃO CRÍTICA DE TRATAMENTO NUMÉRICO DE ENTRADA (Impede R$ 8,99 de virar R$ 899,00)
 def tratar_entrada_numerica(texto_valor):
-    if not texto_valor:
+    if texto_valor is None or texto_valor == "":
         return 0.0
+    
+    # Se já for número, retorna direto como float
+    if isinstance(texto_valor, (int, float)):
+        return float(texto_valor)
+        
     try:
         # Remove símbolos de moeda e espaços em branco comuns
         texto_limpo = str(texto_valor).replace("R$", "").replace("r$", "").strip()
         
-        # Caso clássico brasileiro: "1.250,50" -> pontos são milhares, vírgula é decimal
+        # Caso clássico brasileiro: "1.250,50" ou "1,250.50"
         if "," in texto_limpo and "." in texto_limpo:
-            # Remove o ponto de milhar e substitui a vírgula decimal por ponto
-            texto_limpo = texto_limpo.replace(".", "").replace(",", ".")
+            idx_comma = texto_limpo.rfind(",")
+            idx_dot = texto_limpo.rfind(".")
+            if idx_comma > idx_dot:
+                # Padrão Brasileiro (ponto milhar, vírgula decimal)
+                texto_limpo = texto_limpo.replace(".", "").replace(",", ".")
+            else:
+                # Padrão Americano (vírgula milhar, ponto decimal)
+                texto_limpo = texto_limpo.replace(",", "")
         # Caso: "8,99" -> apenas vírgula separando centavos
         elif "," in texto_limpo:
             texto_limpo = texto_limpo.replace(",", ".")
@@ -146,7 +157,6 @@ def tratar_entrada_numerica(texto_valor):
         val_float = float(texto_limpo)
         return round(val_float, 2)
     except Exception as e:
-        st.error(f"Erro ao processar o formato do número '{texto_valor}'. Certifique-se de digitar números válidos.")
         return 0.0
 
 # CONEXÃO COM O GOOGLE SHEETS COM DIAGNÓSTICO DETALHADO
@@ -288,17 +298,20 @@ with tabs[0]:
                     # Converte os responsáveis para formato string separado por vírgula para salvar no Sheets
                     resp_salvar = ", ".join(responsavel)
                     
-                    # CORREÇÃO CRÍTICA DE GRAVAÇÃO: Grava o valor formatado como string com VÍRGULA
-                    # O Google Sheets brasileiro vai converter isso nativamente para número decimal brasileiro perfeito
-                    valor_gravar_sheets = f"{val_float:.2f}".replace(".", ",")
-                    
                     novo_registro = [
-                        str(data), descricao, valor_gravar_sheets, categoria, tipo, 
-                        resp_salvar, forma_pagto, parcelado, int(num_parcelas)
+                        str(data), 
+                        descricao, 
+                        float(val_float),  # CORREÇÃO DEFINITIVA: Envia como float puro! Google Sheets decide a formatação local
+                        categoria, 
+                        tipo, 
+                        resp_salvar, 
+                        forma_pagto, 
+                        parcelado, 
+                        int(num_parcelas)
                     ]
                     try:
-                        # Envia os dados usando gravação tipo usuário, forçando o Sheets a converter strings de vírgula em decimais locais
-                        sheet_conn.append_row(novo_registro, value_input_option='USER_ENTERED')
+                        # Envia os dados usando gravação nativa (RAW) para não forçar string parsing local
+                        sheet_conn.append_row(novo_registro, value_input_option='RAW')
                         st.success(f"Sucesso! '{descricao}' gravado na planilha com o valor de {formatar_brl(val_float)}.")
                         st.balloons()
                     except Exception as e:
@@ -332,12 +345,7 @@ if sheet_conn is not None:
             
             # TRATAMENTO CRÍTICO DE LEITURA DE VALORES DA PLANILHA (Evita problemas de R$ 899,00)
             valor_raw = row.get('Valor', 0.0)
-            if isinstance(valor_raw, str):
-                # Se vier com ponto e vírgula misturados (ex: 1.250,50 ou 8,99), limpa e converte para float decimal
-                valor_total = tratar_entrada_numerica(valor_raw)
-            else:
-                # Se o pandas já leu como float direto do Sheets
-                valor_total = float(valor_raw)
+            valor_total = tratar_entrada_numerica(valor_raw)
                 
             tipo_lanc = row.get('Tipo', 'Gasto Variável')
             total_parc = int(row['Parcelas_Totais']) if row.get('Parcelas_Totais') else 1
@@ -568,6 +576,43 @@ if sheet_conn is not None:
                             height=300
                         )
                         st.plotly_chart(fig_linhas, use_container_width=True)
+
+                    st.write("---")
+
+                    # NOVO GRÁFICO 4: HEATMAP MENSAL DE CATEGORIAS (Filtra apenas Despesas)
+                    st.markdown("**Matriz de Calor: Intensidade dos Gastos por Categoria ao longo dos Meses**")
+                    df_heatmap_data = df_projetado[df_projetado['Tipo'] != 'Entrada'].groupby(['Mes_Fatura', 'Categoria'])['Valor_Parcela'].sum().reset_index()
+                    
+                    if not df_heatmap_data.empty:
+                        pivot_heatmap = df_heatmap_data.pivot(index='Categoria', columns='Mes_Fatura', values='Valor_Parcela').fillna(0.0)
+                        
+                        # Paleta de cores gradiente elegante de Emerald para Indigo
+                        escala_calor = [
+                            [0.0, '#f8fafc'],  # Quase branco (cinza suave) para valores zerados
+                            [0.2, '#d1fae5'],  # Verde claro
+                            [0.5, '#34d399'],  # Emerald
+                            [0.8, '#6366f1'],  # Indigo
+                            [1.0, '#1e1b4b']   # Indigo Escuro / Deep Purple
+                        ]
+                        
+                        fig_heatmap = go.Figure(data=go.Heatmap(
+                            z=pivot_heatmap.values,
+                            x=pivot_heatmap.columns,
+                            y=pivot_heatmap.index,
+                            colorscale=escala_calor,
+                            hovertemplate="Mês: %{x}<br>Categoria: %{y}<br>Valor: R$ %{z:,.2f}<extra></extra>",
+                            showscale=True
+                        ))
+                        
+                        fig_heatmap.update_layout(
+                            margin=dict(t=10, b=10, l=10, r=10),
+                            height=350,
+                            xaxis_title="Meses de Competência",
+                            yaxis_title="Categorias de Despesa"
+                        )
+                        st.plotly_chart(fig_heatmap, use_container_width=True)
+                    else:
+                        st.info("Aguardando lançamentos para renderizar a matriz de calor.")
                     
                     st.write("---")
                     
@@ -735,17 +780,22 @@ if sheet_conn is not None:
                                 elif e_desc and val_novo_float > 0:
                                     # Cria array atualizado
                                     resp_ed_salvar = ", ".join(e_resp)
-                                    valor_ed_gravar = f"{val_novo_float:.2f}".replace(".", ",")
                                     
                                     linha_atualizada = [
-                                        str(e_data), e_desc, valor_ed_gravar, e_cat, e_tipo, 
-                                        resp_ed_salvar, e_forma, e_parcelado, e_tot_parc
+                                        str(e_data), 
+                                        e_desc, 
+                                        float(val_novo_float),  # Grava como float numérico para evitar bugs de vírgula/ponto
+                                        e_cat, 
+                                        e_tipo, 
+                                        resp_ed_salvar, 
+                                        e_forma, 
+                                        e_parcelado, 
+                                        int(e_tot_parc)
                                     ]
                                     
                                     try:
-                                        # Substitui a linha antiga diretamente na planilha usando gravação em formato brasileiro
-                                        # O gspread usa índices que começam em 1, por isso a correspondência é direta
-                                        sheet_conn.update(f"A{linha_planilha_real}:I{linha_planilha_real}", [linha_atualizada], value_input_option='USER_ENTERED')
+                                        # Substitui a linha antiga diretamente na planilha usando gravação em formato nativo RAW
+                                        sheet_conn.update(f"A{linha_planilha_real}:I{linha_planilha_real}", [linha_atualizada], value_input_option='RAW')
                                         st.success("Lançamento atualizado com sucesso! Reiniciando visualização...")
                                         st.rerun()
                                     except Exception as err:
