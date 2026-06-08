@@ -473,7 +473,7 @@ if sheet_conn is not None:
                                 values='Valor_Parcela', 
                                 names='Categoria', 
                                 hole=0.5,
-                                color_discrete_sequence=px.colors.sequential.Emerald_r + px.colors.sequential.Indigo_r
+                                color_discrete_sequence=['#059669', '#312e81', '#10b981', '#4f46e5', '#047857', '#4338ca', '#065f46', '#3730a3', '#064e3b', '#6366f1']
                             )
                             fig_donut.update_traces(
                                 textinfo='percent+label',
