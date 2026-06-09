@@ -241,28 +241,31 @@ with tabs[0]:
     if sheet_conn is None:
         st.info("⚠️ **O formulário de envio está temporariamente desativado devido a problemas de conexão.**")
     else:
+        # 🟢 CORREÇÃO DOS GARGALOS DINÂMICOS: "Tipo de Lançamento" fora do st.form
+        # Isso garante reatividade instantânea na troca de categorias sem precisar clicar em enviar!
+        tipo = st.selectbox("Tipo de Lançamento", ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"])
+        
+        # Define a lista de categorias baseado no Tipo selecionado
+        if tipo == "Gasto Fixo":
+            lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
+        elif tipo == "Gasto Variável":
+            lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
+        elif tipo == "Assinatura":
+            lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
+        else: 
+            lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
+        
+        # Agora o formulário propriamente dito
         with st.form("form_lancamento", clear_on_submit=True):
             col1, col2 = st.columns([1, 1])
             with col1:
                 # Calendário iniciando na data real do fuso de SP
                 data = st.date_input("Data do Lançamento", hoje_brasil, format="DD/MM/YYYY")
                 descricao = st.text_input("Descrição", placeholder="Ex: Sorveteria Sávio, Roupas na Shein, Mercado Muffato")
-                
                 valor_texto = st.text_input("Valor (R$)", value="0,00", help="Use vírgula para centavos. Exemplo: 8,99 ou 150,50")
-                
-                tipo = st.selectbox("Tipo de Lançamento", ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"])
             
             with col2:
-                # Categoria Dinâmica
-                if tipo == "Gasto Fixo":
-                    lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
-                elif tipo == "Gasto Variável":
-                    lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
-                elif tipo == "Assinatura":
-                    lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
-                else: 
-                    lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
-                
+                # Seleção de Categoria dinâmica associada ao Tipo escolhido lá em cima
                 categoria = st.selectbox("Categoria", lista_cats)
                 
                 responsavel = st.multiselect(
