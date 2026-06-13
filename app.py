@@ -64,7 +64,7 @@ st.markdown("""
         justify-content: space-between;
         padding: 20px;
         border-radius: 12px;
-        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
         transition: transform 0.3s ease, box-shadow 0.3s ease;
         height: 100%;
         color: white;
@@ -113,6 +113,26 @@ st.markdown("""
     .kpi-subtitle {
         font-size: 12px;
         opacity: 0.8;
+    }
+
+    /* Cards de widget para gráficos (Estilo SaaS Moderno) */
+    .dashboard-card {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+        margin-bottom: 20px;
+    }
+
+    .dashboard-card-title {
+        font-size: 16px;
+        font-weight: 700;
+        color: #1e1b4b;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
 
     /* Título com gradiente elegante */
@@ -246,9 +266,9 @@ with tabs[0]:
         
         # Define a lista de categorias baseado no Tipo selecionado
         if tipo == "Gasto Fixo":
-            lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "IPTU", "Outros Fixos"]
+            lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
         elif tipo == "Gasto Variável":
-            lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Barbearia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
+            lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
         elif tipo == "Assinatura":
             lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
         else: 
@@ -318,7 +338,7 @@ if sheet_conn is not None:
         st.warning("Aguardando lançamentos na aba 'Lancamentos' para carregar os gráficos.")
 
     if not dados_brutos.empty:
-        # Processar projeções de parcelas futuras e assinaturas automáticas em memória
+        # Processar projeções de parcelas futures e assinaturas automáticas em memória
         lista_projetada = []
         for index, row in dados_brutos.iterrows():
             try:
@@ -461,7 +481,11 @@ if sheet_conn is not None:
                     
                     # GRÁFICO 1: GASTOS VARIÁVEIS (Facilmente controláveis)
                     with g_col1:
-                        st.markdown("**💸 Gastos Variáveis (Foco de Controle Ativo)**")
+                        st.markdown("""
+                        <div class="dashboard-card">
+                            <div class="dashboard-card-title">💸 Gastos Variáveis (Foco de Controle Ativo)</div>
+                        </div>
+                        """, unsafe_allow_html=True)
                         # Filtra apenas os Gastos Variáveis do mês selecionado
                         df_gasto_var = df_mes[df_mes['Tipo'] == 'Gasto Variável'].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
                         
@@ -495,7 +519,11 @@ if sheet_conn is not None:
                             
                     # GRÁFICO 2: GASTOS FIXOS & ASSINATURAS (Comprometido estrutural)
                     with g_col2:
-                        st.markdown("**🔒 Gastos Fixos & Assinaturas (Custo Estrutural)**")
+                        st.markdown("""
+                        <div class="dashboard-card">
+                            <div class="dashboard-card-title">🔒 Gastos Fixos & Assinaturas (Custo Estrutural)</div>
+                        </div>
+                        """, unsafe_allow_html=True)
                         # Filtra apenas os Gastos Fixos e Assinaturas
                         df_gasto_fix = df_mes[df_mes['Tipo'].isin(['Gasto Fixo', 'Assinatura'])].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
                         
@@ -597,35 +625,6 @@ if sheet_conn is not None:
                                 height=280
                             )
                             st.plotly_chart(fig_linhas, use_container_width=True)
-                    
-                    st.write("---")
-                    
-                    # MATRIZ DE CALOR (HEATMAP DE CATEGORIAS)
-                    st.markdown("**Matriz de Calor de Gastos por Categoria (Últimos 6 meses)**")
-                    df_despesas_total = df_projetado[df_projetado['Tipo'] != 'Entrada']
-                    if not df_despesas_total.empty:
-                        # Pivotando os dados para a estrutura de Heatmap
-                        df_heatmap_data = df_despesas_total.groupby(['Categoria', 'Mes_Fatura'])['Valor_Parcela'].sum().unstack(fill_value=0.0)
-                        
-                        # Limita aos últimos 6 meses de faturamento para melhor layout em tela
-                        meses_recentes = sorted(df_despesas_total['Mes_Fatura'].unique())[-6:]
-                        df_heatmap_data = df_heatmap_data[meses_recentes]
-                        
-                        # Escala de cor customizada Premium do White ao Indigo Profundo
-                        fig_heatmap = go.Figure(data=go.Heatmap(
-                            z=df_heatmap_data.values,
-                            x=df_heatmap_data.columns,
-                            y=df_heatmap_data.index,
-                            colorscale=[[0.0, '#f8fafc'], [0.1, '#e0e7ff'], [0.5, '#6366f1'], [1.0, '#1e1b4b']],
-                            hovertemplate="Mês: %{x}<br>Categoria: %{y}<br>Valor: R$ %{z:,.2f}<extra></extra>"
-                        ))
-                        fig_heatmap.update_layout(
-                            xaxis_title="Meses de Fatura",
-                            yaxis_title="Categorias",
-                            margin=dict(t=20, b=20, l=10, r=10),
-                            height=320
-                        )
-                        st.plotly_chart(fig_heatmap, use_container_width=True)
                     
                     st.write("---")
                     
