@@ -246,9 +246,9 @@ with tabs[0]:
         
         # Define a lista de categorias baseado no Tipo selecionado
         if tipo == "Gasto Fixo":
-            lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
+            lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "IPTU", "Outros Fixos"]
         elif tipo == "Gasto Variável":
-            lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
+            lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Barbearia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
         elif tipo == "Assinatura":
             lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
         else: 
