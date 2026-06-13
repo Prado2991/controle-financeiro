@@ -64,7 +64,7 @@ st.markdown("""
         justify-content: space-between;
         padding: 20px;
         border-radius: 12px;
-        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
         transition: transform 0.3s ease, box-shadow 0.3s ease;
         height: 100%;
         color: white;
@@ -261,17 +261,41 @@ with tabs[0]:
     if sheet_conn is None:
         st.info("⚠️ **O formulário de envio está temporariamente desativado devido a problemas de conexão.**")
     else:
-        # Reatividade fora do form para as categorias dinâmicas
-        tipo = st.selectbox("Tipo de Lançamento", ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"])
+        # 🟢 Tipo de Lançamento fora do form para garantir interatividade imediata das categorias
+        tipo_exibido = st.selectbox(
+            "Tipo de Lançamento", 
+            [
+                "Gasto Variável", 
+                "Gasto Fixo (Valor Variável)", 
+                "Gasto Fixo / Assinatura (Valor Fixo)", 
+                "Entrada"
+            ]
+        )
         
-        # Define a lista de categorias baseado no Tipo selecionado
-        if tipo == "Gasto Fixo":
-            lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
-        elif tipo == "Gasto Variável":
+        # Define a lista de categorias e o tipo que será de fato gravado na planilha para compatibilidade
+        if tipo_exibido == "Gasto Fixo (Valor Variável)":
+            tipo_salvar = "Gasto Fixo"
+            lista_cats = ["Luz", "Água", "Internet (Variável)", "Telefone (Variável)", "Condomínio (Variável)", "Outros Fixos Variáveis"]
+        elif tipo_exibido == "Gasto Fixo / Assinatura (Valor Fixo)":
+            # Salvaremos como "Gasto Fixo / Assinatura" na planilha para que a projeção de 12 meses seja ativada
+            tipo_salvar = "Gasto Fixo / Assinatura"
+            lista_cats = [
+                "Internet", 
+                "Telefone/Celular", 
+                "Aluguel", 
+                "Condomínio", 
+                "Plano de Saúde", 
+                "Academia", 
+                "Streaming (Netflix/Spotify/Prime)", 
+                "Seguro (Carro/Casa)", 
+                "Mensalidade Escolar/Curso", 
+                "Outros Fixos Recorrentes"
+            ]
+        elif tipo_exibido == "Gasto Variável":
+            tipo_salvar = "Gasto Variável"
             lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
-        elif tipo == "Assinatura":
-            lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
         else: 
+            tipo_salvar = "Entrada"
             lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
         
         with st.form("form_lancamento", clear_on_submit=True):
@@ -279,7 +303,7 @@ with tabs[0]:
             with col1:
                 # Calendário iniciando na data real do fuso de SP
                 data = st.date_input("Data do Lançamento", hoje_brasil, format="DD/MM/YYYY")
-                descricao = st.text_input("Descrição", placeholder="Ex: Sorveteria Sávio, Roupas na Shein, Mercado Muffato")
+                descricao = st.text_input("Descrição", placeholder="Ex: Sorveteria Sávio, Plano Claro, Conta Copel")
                 valor_texto = st.text_input("Valor (R$)", value="0,00", help="Use vírgula para centavos. Exemplo: 8,99 ou 150,50")
             
             with col2:
@@ -294,7 +318,7 @@ with tabs[0]:
                 
                 forma_pagto = st.selectbox("Forma de Pagamento", ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"])
                 
-                pode_parcelar = tipo in ["Gasto Variável", "Gasto Fixo"]
+                pode_parcelar = tipo_salvar in ["Gasto Variável", "Gasto Fixo"]
                 if pode_parcelar:
                     parcelado = st.radio("Compra Parcelada?", ["Não", "Sim"], horizontal=True)
                     if parcelado == "Sim":
@@ -317,7 +341,7 @@ with tabs[0]:
                     valor_gravar_sheets = f"{val_float:.2f}".replace(".", ",")
                     
                     novo_registro = [
-                        str(data), descricao, valor_gravar_sheets, categoria, tipo, 
+                        str(data), descricao, valor_gravar_sheets, categoria, tipo_salvar, 
                         resp_salvar, forma_pagto, parcelado, int(num_parcelas)
                     ]
                     try:
@@ -338,7 +362,7 @@ if sheet_conn is not None:
         st.warning("Aguardando lançamentos na aba 'Lancamentos' para carregar os gráficos.")
 
     if not dados_brutos.empty:
-        # Processar projeções de parcelas futures e assinaturas automáticas em memória
+        # Processar projeções de parcelas futuras e assinaturas automáticas em memória
         lista_projetada = []
         for index, row in dados_brutos.iterrows():
             try:
@@ -368,8 +392,8 @@ if sheet_conn is not None:
             
             divisao_pessoas = len(responsaveis_list)
             
-            # Projeção de assinaturas para os próximos 12 meses
-            if tipo_lanc == "Assinatura":
+            # Projeção de Assinaturas e Gastos Fixos Recorrentes para os próximos 12 meses
+            if tipo_lanc in ["Assinatura", "Gasto Fixo / Assinatura"]:
                 for m in range(12):
                     dt_recorrente = dt_compra + relativedelta(months=m)
                     mes_competencia = calcular_mes_competencia(dt_recorrente, row.get('Forma_Pagamento', 'Dinheiro'))
@@ -382,7 +406,7 @@ if sheet_conn is not None:
                         item_proj['Parcela_Atual'] = "Recorrente"
                         lista_projetada.append(item_proj)
             else:
-                # Compras normais e parceladas
+                # Compras normais e parceladas (Gasto Variável, Gasto Fixo e Entradas)
                 val_parcela = valor_total / total_parc if row.get('Parcelado') == 'Sim' else valor_total
                 for p in range(total_parc):
                     dt_parcela = dt_compra + relativedelta(months=p)
@@ -479,11 +503,11 @@ if sheet_conn is not None:
                     
                     g_col1, g_col2 = st.columns(2)
                     
-                    # GRÁFICO 1: GASTOS VARIÁVEIS (Facilmente controláveis)
+                    # GRÁFICO 1: GASTOS VARIÁVEIS (Foco de Controle Ativo de Despesas)
                     with g_col1:
                         st.markdown("""
                         <div class="dashboard-card">
-                            <div class="dashboard-card-title">💸 Gastos Variáveis (Foco de Controle Ativo)</div>
+                            <div class="dashboard-card-title">💸 Gastos Variáveis (Foco de Controle Diário)</div>
                         </div>
                         """, unsafe_allow_html=True)
                         # Filtra apenas os Gastos Variáveis do mês selecionado
@@ -517,15 +541,15 @@ if sheet_conn is not None:
                         else:
                             st.info("Nenhum Gasto Variável registrado neste mês de análise.")
                             
-                    # GRÁFICO 2: GASTOS FIXOS & ASSINATURAS (Comprometido estrutural)
+                    # GRÁFICO 2: GASTOS FIXOS & RECORRENTES (Comprometido estrutural)
                     with g_col2:
                         st.markdown("""
                         <div class="dashboard-card">
-                            <div class="dashboard-card-title">🔒 Gastos Fixos & Assinaturas (Custo Estrutural)</div>
+                            <div class="dashboard-card-title">🔒 Gastos Fixos & Assinaturas Recorrentes</div>
                         </div>
                         """, unsafe_allow_html=True)
-                        # Filtra apenas os Gastos Fixos e Assinaturas
-                        df_gasto_fix = df_mes[df_mes['Tipo'].isin(['Gasto Fixo', 'Assinatura'])].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
+                        # Filtra Gastos Fixos normais, Assinaturas tradicionais e o novo tipo unificado
+                        df_gasto_fix = df_mes[df_mes['Tipo'].isin(['Gasto Fixo', 'Assinatura', 'Gasto Fixo / Assus', 'Gasto Fixo / Assinatura'])].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
                         
                         if not df_gasto_fix.empty:
                             total_g_fix = df_gasto_fix['Valor_Parcela'].sum()
@@ -675,10 +699,11 @@ if sheet_conn is not None:
                         
                 with col_direita:
                     st.markdown("### 🔄 Assinaturas e Recorrências Ativas")
-                    df_assinaturas = df_projetado[df_projetado['Tipo'] == 'Assinatura'].drop_duplicates(subset=['Descricao'])
+                    # Filtra tanto o tipo antigo de assinatura quanto o novo modelo recorrente
+                    df_assinaturas = df_projetado[df_projetado['Tipo'].isin(['Assinatura', 'Gasto Fixo / Assinatura'])].drop_duplicates(subset=['Descricao'])
                     if not df_assinaturas.empty:
                         tot_mensal_ass = df_assinaturas['Valor_Parcela'].sum()
-                        st.success(f"📋 **Custo Mensal de Assinaturas:** {formatar_brl(tot_mensal_ass)}")
+                        st.success(f"📋 **Custo Mensal de Assinaturas/Contas Fixas:** {formatar_brl(tot_mensal_ass)}")
                         
                         df_ass_exibe = df_assinaturas[['Descricao', 'Valor_Parcela', 'Categoria', 'Forma_Pagamento']].copy()
                         df_ass_exibe['Valor_Parcela'] = df_ass_exibe['Valor_Parcela'].apply(formatar_brl)
@@ -726,6 +751,17 @@ if sheet_conn is not None:
                         resp_item_raw = str(item_selecionado.get('Responsavel', 'Jonathan'))
                         resp_item_lista = [r.strip() for r in resp_item_raw.split(",") if r.strip()]
                         
+                        # Mapeamento do tipo da planilha para o dropdown interativo
+                        tipo_map = {
+                            "Gasto Variável": "Gasto Variável",
+                            "Gasto Fixo": "Gasto Fixo (Valor Variável)",
+                            "Assinatura": "Gasto Fixo / Assinatura (Valor Fixo)",
+                            "Gasto Fixo / Assinatura": "Gasto Fixo / Assinatura (Valor Fixo)",
+                            "Entrada": "Entrada"
+                        }
+                        stored_tipo = item_selecionado.get('Tipo', 'Gasto Variável')
+                        mapped_tipo = tipo_map.get(stored_tipo, "Gasto Variável")
+                        
                         st.markdown(f"📍 **Editando Linha {linha_planilha_real} da planilha:**")
                         
                         with st.form("form_edicao"):
@@ -734,19 +770,40 @@ if sheet_conn is not None:
                                 e_data = st.date_input("Nova Data", data_item, format="DD/MM/YYYY")
                                 e_desc = st.text_input("Nova Descrição", value=item_selecionado['Descricao'])
                                 e_valor_texto = st.text_input("Corrigir Valor (R$)", value=valor_antigo_br)
-                                e_tipo = st.selectbox(
-                                    "Novo Tipo", 
-                                    ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"],
-                                    index=["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"].index(item_selecionado['Tipo'])
-                                )
+                                
+                                e_tipo_options = [
+                                    "Gasto Variável", 
+                                    "Gasto Fixo (Valor Variável)", 
+                                    "Gasto Fixo / Assinatura (Valor Fixo)", 
+                                    "Entrada"
+                                ]
+                                idx_tipo_edicao = e_tipo_options.index(mapped_tipo) if mapped_tipo in e_tipo_options else 0
+                                e_tipo = st.selectbox("Novo Tipo", e_tipo_options, index=idx_tipo_edicao)
+                                
                             with e_col2:
-                                if e_tipo == "Gasto Fixo":
-                                    e_lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
+                                # Reatividade interna da categoria de edição baseada no tipo selecionado
+                                if e_tipo == "Gasto Fixo (Valor Variável)":
+                                    tipo_ed_salvar = "Gasto Fixo"
+                                    e_lista_cats = ["Luz", "Água", "Internet (Variável)", "Telefone (Variável)", "Condomínio (Variável)", "Outros Fixos Variáveis"]
+                                elif e_tipo == "Gasto Fixo / Assinatura (Valor Fixo)":
+                                    tipo_ed_salvar = "Gasto Fixo / Assinatura"
+                                    e_lista_cats = [
+                                        "Internet", 
+                                        "Telefone/Celular", 
+                                        "Aluguel", 
+                                        "Condomínio", 
+                                        "Plano de Saúde", 
+                                        "Academia", 
+                                        "Streaming (Netflix/Spotify/Prime)", 
+                                        "Seguro (Carro/Casa)", 
+                                        "Mensalidade Escolar/Curso", 
+                                        "Outros Fixos Recorrentes"
+                                    ]
                                 elif e_tipo == "Gasto Variável":
+                                    tipo_ed_salvar = "Gasto Variável"
                                     e_lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
-                                elif e_tipo == "Assinatura":
-                                    e_lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
                                 else: 
+                                    tipo_ed_salvar = "Entrada"
                                     e_lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
                                 
                                 idx_cat_edicao = e_lista_cats.index(item_selecionado['Categoria']) if item_selecionado['Categoria'] in e_lista_cats else 0
@@ -779,7 +836,7 @@ if sheet_conn is not None:
                                     valor_ed_gravar = f"{val_novo_float:.2f}".replace(".", ",")
                                     
                                     linha_atualizada = [
-                                        str(e_data), e_desc, valor_ed_gravar, e_cat, e_tipo, 
+                                        str(e_data), e_desc, valor_ed_gravar, e_cat, tipo_ed_salvar, 
                                         resp_ed_salvar, e_forma, e_parcelado, e_tot_parc
                                     ]
                                     
