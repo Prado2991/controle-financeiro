@@ -132,7 +132,7 @@ def formatar_brl(valor):
     try:
         val = float(valor)
         return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    except Exception:
+    except:
         return "R$ 0,00"
 
 # TRATAMENTO NUMÉRICO DE ENTRADA
@@ -147,7 +147,7 @@ def tratar_entrada_numerica(texto_valor):
             texto_limpo = texto_limpo.replace(",", ".")
         val_float = float(texto_limpo)
         return round(val_float, 2)
-    except Exception:
+    except Exception as e:
         return 0.0
 
 # CONEXÃO COM O GOOGLE SHEETS COM DIAGNÓSTICO DETALHADO
@@ -221,139 +221,6 @@ def calcular_mes_competencia(data_compra, forma_pagamento):
         
     return data_fatura.strftime("%Y-%m")
 
-@st.cache_data(ttl=60)
-def projetar(df, hoje):
-    """
-    Função de projeção ultra robusta que previne AttributeError ao converter tuplas
-    nomeadas em dicionários flexíveis para busca de atributos.
-    """
-    if df.empty:
-        return pd.DataFrame(), []
-        
-    lista_projetada = []
-    avisos = []
-    
-    # Normaliza nomes de colunas para evitar espaços indesejados
-    df.columns = [col.strip() for col in df.columns]
-    
-    for r in df.itertuples(index=False):
-        # Converte em dict para evitar erros como r._Data ou r._Valor
-        r_dict = r._asdict()
-        
-        # Procura coluna de data com fallbacks
-        data_raw = None
-        for key in ['Data', '_Data', 'data', '_data']:
-            if key in r_dict:
-                data_raw = r_dict[key]
-                break
-        if data_raw is None:
-            # Fallback para o primeiro elemento disponível
-            data_raw = r_dict[list(r_dict.keys())[0]] if r_dict else None
-            
-        if not data_raw:
-            continue
-            
-        # Parseia a data com resiliência
-        dt_compra = None
-        try:
-            dt_compra = datetime.strptime(str(data_raw).split()[0], "%Y-%m-%d").date()
-        except Exception:
-            try:
-                dt_compra = datetime.strptime(str(data_raw).split()[0], "%d/%m/%Y").date()
-            except Exception:
-                continue
-                
-        # Procura coluna de valor com fallbacks
-        valor_raw = 0.0
-        for key in ['Valor', '_Valor', 'valor', '_valor']:
-            if key in r_dict:
-                valor_raw = r_dict[key]
-                break
-                
-        if isinstance(valor_raw, str):
-            valor_total = tratar_entrada_numerica(valor_raw)
-        else:
-            valor_total = float(valor_raw)
-            
-        # Procura coluna de tipo
-        tipo_lanc = 'Gasto Variável'
-        for key in ['Tipo', '_Tipo', 'tipo', '_tipo']:
-            if key in r_dict:
-                tipo_lanc = str(r_dict[key])
-                break
-                
-        # Procura parcelas totais
-        total_parc = 1
-        for key in ['Parcelas_Totais', '_Parcelas_Totais', 'ParcelasTotais', 'parcelas_totais']:
-            if key in r_dict:
-                try:
-                    total_parc = int(r_dict[key])
-                except Exception:
-                    total_parc = 1
-                break
-        if total_parc < 1:
-            total_parc = 1
-            
-        # Procura responsável
-        resp_raw = 'Jonathan'
-        for key in ['Responsavel', '_Responsavel', 'responsavel', '_responsavel']:
-            if key in r_dict:
-                resp_raw = str(r_dict[key])
-                break
-                
-        responsaveis_list = [resp.strip() for resp in resp_raw.split(",") if resp.strip()]
-        if not responsaveis_list:
-            responsaveis_list = ["Jonathan"]
-            
-        divisao_pessoas = len(responsaveis_list)
-        
-        # Procura forma de pagamento
-        forma_pagto = 'Dinheiro'
-        for key in ['Forma_Pagamento', '_Forma_Pagamento', 'forma_pagto', 'forma_pagamento']:
-            if key in r_dict:
-                forma_pagto = str(r_dict[key])
-                break
-                
-        # Procura se está parcelado
-        parcelado_str = 'Não'
-        for key in ['Parcelado', '_Parcelado', 'parcelado']:
-            if key in r_dict:
-                parcelado_str = str(r_dict[key])
-                break
-                
-        # Projeção de assinaturas para os próximos 12 meses
-        if tipo_lanc == "Assinatura":
-            for m in range(12):
-                dt_recorrente = dt_compra + relativedelta(months=m)
-                mes_competencia = calcular_mes_competencia(dt_recorrente, forma_pagto)
-                
-                for resp in responsaveis_list:
-                    item_proj = r_dict.copy()
-                    item_proj['Mes_Fatura'] = mes_competencia
-                    item_proj['Valor_Parcela'] = valor_total / divisao_pessoas
-                    item_proj['Responsavel_Dividido'] = resp
-                    item_proj['Parcela_Atual'] = "Recorrente"
-                    item_proj['Data_Parsed'] = dt_recorrente
-                    lista_projetada.append(item_proj)
-        else:
-            # Compras normais e parceladas
-            val_parcela = valor_total / total_parc if parcelado_str == 'Sim' else valor_total
-            for p in range(total_parc):
-                dt_parcela = dt_compra + relativedelta(months=p)
-                mes_competencia = calcular_mes_competencia(dt_parcela, forma_pagto)
-                
-                for resp in responsaveis_list:
-                    item_proj = r_dict.copy()
-                    item_proj['Mes_Fatura'] = mes_competencia
-                    item_proj['Valor_Parcela'] = val_parcela / divisao_pessoas
-                    item_proj['Responsavel_Dividido'] = resp
-                    item_proj['Parcela_Atual'] = f"{p+1}/{total_parc}" if parcelado_str == 'Sim' else "1/1"
-                    item_proj['Data_Parsed'] = dt_parcela
-                    lista_projetada.append(item_proj)
-                    
-    df_proj = pd.DataFrame(lista_projetada)
-    return df_proj, avisos
-
 # INTERFACE DO USUÁRIO
 st.markdown('<div class="main-title">💰 Controle Financeiro Familiar</div>', unsafe_allow_html=True)
 st.markdown("### Jonathan Prado")
@@ -374,7 +241,7 @@ with tabs[0]:
     if sheet_conn is None:
         st.info("⚠️ **O formulário de envio está temporariamente desativado devido a problemas de conexão.**")
     else:
-        # Reatividade instantânea na troca de categorias fora do st.form
+        # Reatividade fora do form para as categorias dinâmicas
         tipo = st.selectbox("Tipo de Lançamento", ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"])
         
         # Define a lista de categorias baseado no Tipo selecionado
@@ -387,7 +254,6 @@ with tabs[0]:
         else: 
             lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
         
-        # Form de Envio
         with st.form("form_lancamento", clear_on_submit=True):
             col1, col2 = st.columns([1, 1])
             with col1:
@@ -418,7 +284,7 @@ with tabs[0]:
                 else:
                     parcelado = "Não"
                     num_parcelas = 1
-                    
+            
             botao_salvar = st.form_submit_button("🚀 Gravar na Planilha")
             
             if botao_salvar:
@@ -452,22 +318,77 @@ if sheet_conn is not None:
         st.warning("Aguardando lançamentos na aba 'Lancamentos' para carregar os gráficos.")
 
     if not dados_brutos.empty:
-        # Normalização dos cabeçalhos das colunas
-        dados_brutos.columns = [col.strip() for col in dados_brutos.columns]
-        
-        # Execução da nossa projeção blindada e otimizada (Resolvendo erro AttributeError)
-        df_projetado, avisos_proj = projetar(dados_brutos, hoje_brasil)
-        
-        if not df_projetado.empty:
+        # Processar projeções de parcelas futuras e assinaturas automáticas em memória
+        lista_projetada = []
+        for index, row in dados_brutos.iterrows():
+            try:
+                if not row.get('Data'):
+                    continue
+                dt_compra = datetime.strptime(str(row['Data']).split()[0], "%Y-%m-%d").date()
+            except Exception as parse_error:
+                try:
+                    dt_compra = datetime.strptime(str(row['Data']).split()[0], "%d/%m/%Y").date()
+                except:
+                    continue
+            
+            valor_raw = row.get('Valor', 0.0)
+            if isinstance(valor_raw, str):
+                valor_total = tratar_entrada_numerica(valor_raw)
+            else:
+                valor_total = float(valor_raw)
+                
+            tipo_lanc = row.get('Tipo', 'Gasto Variável')
+            total_parc = int(row['Parcelas_Totais']) if row.get('Parcelas_Totais') else 1
+            
+            # Divisão proporcional de responsáveis
+            resp_raw = str(row.get('Responsavel', 'Jonathan'))
+            responsaveis_list = [r.strip() for r in resp_raw.split(",") if r.strip()]
+            if not responsaveis_list:
+                responsaveis_list = ["Jonathan"]
+            
+            divisao_pessoas = len(responsaveis_list)
+            
+            # Projeção de assinaturas para os próximos 12 meses
+            if tipo_lanc == "Assinatura":
+                for m in range(12):
+                    dt_recorrente = dt_compra + relativedelta(months=m)
+                    mes_competencia = calcular_mes_competencia(dt_recorrente, row.get('Forma_Pagamento', 'Dinheiro'))
+                    
+                    for resp in responsaveis_list:
+                        item_proj = row.to_dict()
+                        item_proj['Mes_Fatura'] = mes_competencia
+                        item_proj['Valor_Parcela'] = valor_total / divisao_pessoas
+                        item_proj['Responsavel_Dividido'] = resp
+                        item_proj['Parcela_Atual'] = "Recorrente"
+                        lista_projetada.append(item_proj)
+            else:
+                # Compras normais e parceladas
+                val_parcela = valor_total / total_parc if row.get('Parcelado') == 'Sim' else valor_total
+                for p in range(total_parc):
+                    dt_parcela = dt_compra + relativedelta(months=p)
+                    mes_competencia = calcular_mes_competencia(dt_parcela, row.get('Forma_Pagamento', 'Dinheiro'))
+                    
+                    for resp in responsaveis_list:
+                        item_proj = row.to_dict()
+                        item_proj['Mes_Fatura'] = mes_competencia
+                        item_proj['Valor_Parcela'] = val_parcela / divisao_pessoas
+                        item_proj['Responsavel_Dividido'] = resp
+                        item_proj['Parcela_Atual'] = f"{p+1}/{total_parc}" if row.get('Parcelado') == 'Sim' else "1/1"
+                        lista_projetada.append(item_proj)
+                
+        if lista_projetada:
+            df_projetado = pd.DataFrame(lista_projetada)
+            df_projetado['Valor_Parcela'] = df_projetado['Valor_Parcela'].astype(float)
+            
             # Traduzir a exibição da data nas tabelas
             def formatar_data_br(data_str):
                 try:
                     dt = datetime.strptime(str(data_str).split()[0], "%Y-%m-%d")
                     return dt.strftime("%d/%m/%Y")
-                except Exception:
+                except:
                     return data_str
             
-            df_projetado['Data_Exibicao'] = df_projetado['Data_Parsed'].apply(formatar_data_br)
+            df_projetado['Data_Exibicao'] = df_projetado['Data'].apply(formatar_data_br)
             
             # TAB 2: DASHBOARD
             with tabs[1]:
@@ -534,45 +455,85 @@ if sheet_conn is not None:
                     
                     st.write("---")
                     
-                    # SEÇÃO DE GRÁFICOS INTERATIVOS PLOTLY
-                    st.markdown("### Visualização de Distribuição e Análise")
+                    st.markdown("### 📊 Análise Setorial das Despesas")
                     
                     g_col1, g_col2 = st.columns(2)
                     
+                    # GRÁFICO 1: GASTOS VARIÁVEIS (Facilmente controláveis)
                     with g_col1:
-                        st.markdown("**Gastos por Categoria (Donut Chart com Total)**")
-                        df_gasto_cat = df_mes[df_mes['Tipo'] != 'Entrada'].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
+                        st.markdown("**💸 Gastos Variáveis (Foco de Controle Ativo)**")
+                        # Filtra apenas os Gastos Variáveis do mês selecionado
+                        df_gasto_var = df_mes[df_mes['Tipo'] == 'Gasto Variável'].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
                         
-                        if not df_gasto_cat.empty:
-                            total_gastos = df_gasto_cat['Valor_Parcela'].sum()
-                            fig_donut = px.pie(
-                                df_gasto_cat, 
+                        if not df_gasto_var.empty:
+                            total_g_var = df_gasto_var['Valor_Parcela'].sum()
+                            fig_donut_var = px.pie(
+                                df_gasto_var, 
                                 values='Valor_Parcela', 
                                 names='Categoria', 
                                 hole=0.5,
-                                color_discrete_sequence=['#059669', '#312e81', '#10b981', '#4f46e5', '#047857', '#4338ca', '#065f46', '#3730a3', '#064e3b', '#6366f1']
+                                color_discrete_sequence=['#10b981', '#059669', '#34d399', '#6ee7b7', '#a7f3d0', '#047857', '#065f46', '#064e3b'] # Tons verdes esmeralda
                             )
-                            fig_donut.update_traces(
+                            fig_donut_var.update_traces(
                                 textinfo='percent+label',
-                                hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:,.2f}<br>Representa: %{percent}<extra></extra>"
+                                hovertemplate="<b>%{label}</b><br>Gasto: R$ %{value:,.2f}<br>Fração: %{percent}<extra></extra>"
                             )
-                            fig_donut.add_annotation(
-                                text=f"Total<br><b>R$ {total_gastos:,.2f}</b>",
+                            fig_donut_var.add_annotation(
+                                text=f"Variáveis<br><b>R$ {total_g_var:,.2f}</b>",
                                 showarrow=False,
-                                font_size=16,
-                                font_color="#1e1b4b"
+                                font_size=15,
+                                font_color="#064e3b"
                             )
-                            fig_donut.update_layout(
+                            fig_donut_var.update_layout(
                                 margin=dict(t=10, b=10, l=10, r=10),
                                 showlegend=False,
-                                height=350
+                                height=320
                             )
-                            st.plotly_chart(fig_donut, use_container_width=True)
+                            st.plotly_chart(fig_donut_var, use_container_width=True)
                         else:
-                            st.info("Nenhum gasto registrado para gerar gráfico de rosca.")
+                            st.info("Nenhum Gasto Variável registrado neste mês de análise.")
                             
+                    # GRÁFICO 2: GASTOS FIXOS & ASSINATURAS (Comprometido estrutural)
                     with g_col2:
-                        st.markdown("**Balanço de Gastos Dividido (Barras Horizontais em R$)**")
+                        st.markdown("**🔒 Gastos Fixos & Assinaturas (Custo Estrutural)**")
+                        # Filtra apenas os Gastos Fixos e Assinaturas
+                        df_gasto_fix = df_mes[df_mes['Tipo'].isin(['Gasto Fixo', 'Assinatura'])].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
+                        
+                        if not df_gasto_fix.empty:
+                            total_g_fix = df_gasto_fix['Valor_Parcela'].sum()
+                            fig_donut_fix = px.pie(
+                                df_gasto_fix, 
+                                values='Valor_Parcela', 
+                                names='Categoria', 
+                                hole=0.5,
+                                color_discrete_sequence=['#312e81', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe'] # Tons azuis/indigo
+                            )
+                            fig_donut_fix.update_traces(
+                                textinfo='percent+label',
+                                hovertemplate="<b>%{label}</b><br>Comprometido: R$ %{value:,.2f}<br>Fração: %{percent}<extra></extra>"
+                            )
+                            fig_donut_fix.add_annotation(
+                                text=f"Comprometido<br><b>R$ {total_g_fix:,.2f}</b>",
+                                showarrow=False,
+                                font_size=15,
+                                font_color="#1e1b4b"
+                            )
+                            fig_donut_fix.update_layout(
+                                margin=dict(t=10, b=10, l=10, r=10),
+                                showlegend=False,
+                                height=320
+                            )
+                            st.plotly_chart(fig_donut_fix, use_container_width=True)
+                        else:
+                            st.info("Nenhum Gasto Fixo ou Assinatura registrado neste mês.")
+                    
+                    st.write("---")
+                    
+                    st.markdown("### 📊 Balanço de Participação e Histórico")
+                    b_col1, b_col2 = st.columns(2)
+                    
+                    with b_col1:
+                        st.markdown("**Balanço de Gastos Dividido (Proporcional em R$)**")
                         # Gráfico usa a coluna "Responsavel_Dividido" para computar as proporções corretas pós-divisão
                         df_gasto_resp = df_mes[df_mes['Tipo'] != 'Entrada'].groupby('Responsavel_Dividido')['Valor_Parcela'].sum().reset_index()
                         
@@ -596,49 +557,46 @@ if sheet_conn is not None:
                                 yaxis_title="Destinatário",
                                 coloraxis_showscale=False,
                                 margin=dict(t=10, b=10, l=10, r=10),
-                                height=350
+                                height=280
                             )
                             st.plotly_chart(fig_barras, use_container_width=True)
                         else:
-                            st.info("Sem dados de despesa para exibir no balanço.")
-                    
-                    st.write("---")
-                    
-                    # GRÁFICO 3: EVOLUÇÃO MENSAL
-                    st.markdown("**Histórico de Evolução Mensal (Entradas vs Despesas)**")
-                    
-                    df_evolucao = df_projetado.groupby(['Mes_Fatura', 'Tipo'])['Valor_Parcela'].sum().unstack(fill_value=0.0).reset_index()
-                    
-                    if not df_evolucao.empty:
-                        if 'Entrada' not in df_evolucao.columns: df_evolucao['Entrada'] = 0.0
+                            st.info("Sem dados de despesa para exibir no balanço de divisão.")
+                            
+                    with b_col2:
+                        st.markdown("**Histórico de Evolução Mensal (Receitas vs Despesas)**")
+                        df_evolucao = df_projetado.groupby(['Mes_Fatura', 'Tipo'])['Valor_Parcela'].sum().unstack(fill_value=0.0).reset_index()
                         
-                        colunas_despesas = [c for c in df_evolucao.columns if c != 'Mes_Fatura' and c != 'Entrada']
-                        df_evolucao['Total_Despesas'] = df_evolucao[colunas_despesas].sum(axis=1)
-                        
-                        fig_linhas = go.Figure()
-                        fig_linhas.add_trace(go.Scatter(
-                            x=df_evolucao['Mes_Fatura'], 
-                            y=df_evolucao['Entrada'],
-                            name='🟢 Entradas (Receitas)',
-                            line=dict(color='#10b981', width=3),
-                            mode='lines+markers',
-                            hovertemplate="Mês: %{x}<br>Receitas: R$ %{y:,.2f}<extra></extra>"
-                        ))
-                        fig_linhas.add_trace(go.Scatter(
-                            x=df_evolucao['Mes_Fatura'], 
-                            y=df_evolucao['Total_Despesas'],
-                            name='🔴 Despesas (Gastos)',
-                            line=dict(color='#6366f1', width=3),
-                            mode='lines+markers',
-                            hovertemplate="Mês: %{x}<br>Despesas: R$ %{y:,.2f}<extra></extra>"
-                        ))
-                        
-                        fig_linhas.update_layout(
-                            margin=dict(t=20, b=20, l=10, r=10),
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                            height=300
-                        )
-                        st.plotly_chart(fig_linhas, use_container_width=True)
+                        if not df_evolucao.empty:
+                            if 'Entrada' not in df_evolucao.columns: df_evolucao['Entrada'] = 0.0
+                            
+                            colunas_despesas = [c for c in df_evolucao.columns if c != 'Mes_Fatura' and c != 'Entrada']
+                            df_evolucao['Total_Despesas'] = df_evolucao[colunas_despesas].sum(axis=1)
+                            
+                            fig_linhas = go.Figure()
+                            fig_linhas.add_trace(go.Scatter(
+                                x=df_evolucao['Mes_Fatura'], 
+                                y=df_evolucao['Entrada'],
+                                name='🟢 Entradas',
+                                line=dict(color='#10b981', width=3),
+                                mode='lines+markers',
+                                hovertemplate="Mês: %{x}<br>Receitas: R$ %{y:,.2f}<extra></extra>"
+                            ))
+                            fig_linhas.add_trace(go.Scatter(
+                                x=df_evolucao['Mes_Fatura'], 
+                                y=df_evolucao['Total_Despesas'],
+                                name='🔴 Despesas',
+                                line=dict(color='#6366f1', width=3),
+                                mode='lines+markers',
+                                hovertemplate="Mês: %{x}<br>Despesas: R$ %{y:,.2f}<extra></extra>"
+                            ))
+                            
+                            fig_linhas.update_layout(
+                                margin=dict(t=20, b=20, l=10, r=10),
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                                height=280
+                            )
+                            st.plotly_chart(fig_linhas, use_container_width=True)
                     
                     st.write("---")
                     
@@ -653,25 +611,25 @@ if sheet_conn is not None:
                         meses_recentes = sorted(df_despesas_total['Mes_Fatura'].unique())[-6:]
                         df_heatmap_data = df_heatmap_data[meses_recentes]
                         
+                        # Escala de cor customizada Premium do White ao Indigo Profundo
                         fig_heatmap = go.Figure(data=go.Heatmap(
                             z=df_heatmap_data.values,
                             x=df_heatmap_data.columns,
                             y=df_heatmap_data.index,
-                            colorscale='Emrld',
+                            colorscale=[[0.0, '#f8fafc'], [0.1, '#e0e7ff'], [0.5, '#6366f1'], [1.0, '#1e1b4b']],
                             hovertemplate="Mês: %{x}<br>Categoria: %{y}<br>Valor: R$ %{z:,.2f}<extra></extra>"
                         ))
                         fig_heatmap.update_layout(
                             xaxis_title="Meses de Fatura",
                             yaxis_title="Categorias",
                             margin=dict(t=20, b=20, l=10, r=10),
-                            height=350
+                            height=320
                         )
                         st.plotly_chart(fig_heatmap, use_container_width=True)
                     
                     st.write("---")
                     
                     st.markdown("**Extrato Detalhado do Mês de Competência**")
-                    # Remove duplicidade de linhas que foram explodidas pelo multiselect para mostrar uma tabela organizada e limpa
                     df_mes_tabela = df_mes.drop_duplicates(subset=['Data', 'Descricao', 'Valor', 'Categoria', 'Forma_Pagamento', 'Parcela_Atual'])
                     
                     df_mes_exibe = df_mes_tabela[['Data_Exibicao', 'Descricao', 'Valor', 'Parcela_Atual', 'Categoria', 'Responsavel', 'Forma_Pagamento', 'Tipo']].copy()
@@ -757,10 +715,10 @@ if sheet_conn is not None:
                         
                         try:
                             data_item = datetime.strptime(str(item_selecionado['Data']).split()[0], "%Y-%m-%d").date()
-                        except Exception:
+                        except:
                             try:
                                 data_item = datetime.strptime(str(item_selecionado['Data']).split()[0], "%d/%m/%Y").date()
-                            except Exception:
+                            except:
                                 data_item = hoje_brasil
                         
                         valor_antigo_float = tratar_entrada_numerica(item_selecionado['Valor'])
