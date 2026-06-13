@@ -1,7 +1,10 @@
 streamlit
 pandas
+numpy
 gspread
 google-auth
 python-dateutil
 plotly
 pytz
+openpyxl
+streamlit-extras
