@@ -1,828 +1,852 @@
-import io
-import json
-from datetime import date, datetime
-from typing import Optional
-
-import gspread
-import numpy as np
+import streamlit as st
 import pandas as pd
+from datetime import datetime, date, timedelta
+from dateutil.relativedelta import relativedelta
+import gspread
+from google.oauth2.service_account import Credentials
+import json
 import plotly.express as px
 import plotly.graph_objects as go
 import pytz
-import streamlit as st
-from dateutil.relativedelta import relativedelta
-from google.oauth2.service_account import Credentials
 
-# ──────────────────────────────────────────────────────────────────────────────
-# CONFIG
-# ──────────────────────────────────────────────────────────────────────────────
+# Configuração da página para visualização Mobile-First e Temática Elegante
 st.set_page_config(
-    page_title="Finanças Jonathan",
-    page_icon="💰",
+    page_title="Finanças Jonathan", 
+    page_icon="💰", 
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="collapsed"
 )
 
-PLANILHA_ID = "1JyVUY1pKQs90jtPPBvEHDLnGxBw3wdooEFWSq-1e5D4"
-ABA_LANCAMENTOS = "Lancamentos"
-ABA_ORCAMENTOS = "Orcamentos"
+# Configuração de fuso horário brasileiro para evitar que o calendário mude de dia antes da hora
+def obter_hoje_brasil():
+    fuso_br = pytz.timezone("America/Sao_Paulo")
+    agora_br = datetime.now(fuso_br)
+    return agora_br.date()
 
-CATEGORIAS_POR_TIPO = {
-    "Gasto Fixo": ["Luz", "Água", "Internet", "Telefone", "Condomínio",
-                   "Aluguel", "Plano de Saúde", "Outros Fixos"],
-    "Gasto Variável": ["Refeição", "Supermercado", "Abastecimento", "Shopping",
-                       "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"],
-    "Assinatura": ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura",
-                   "Software/App", "Outras Assinaturas"],
-    "Entrada": ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"],
-}
-FORMAS_PAGAMENTO = ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"]
-RESPONSAVEIS = ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"]
+hoje_brasil = obter_hoje_brasil()
 
-CORES = {
-    "entrada": "#10b981", "saida": "#ef4444", "saldo_pos": "#059669",
-    "saldo_neg": "#dc2626", "nu": "#8b5cf6", "bb": "#fbbf24",
-    "indigo": "#312e81", "emerald": "#047857",
-}
-PALETA = ["#312e81", "#059669", "#8b5cf6", "#fbbf24", "#0ea5e9", "#ef4444",
-          "#10b981", "#6366f1", "#f97316", "#14b8a6", "#a855f7", "#84cc16"]
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# UTILIDADES
-# ──────────────────────────────────────────────────────────────────────────────
-def hoje_br() -> date:
-    return datetime.now(pytz.timezone("America/Sao_Paulo")).date()
-
-
-def brl(valor) -> str:
-    try:
-        v = float(valor)
-    except (TypeError, ValueError):
-        return "R$ 0,00"
-    sinal = "-" if v < 0 else ""
-    s = f"{abs(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"{sinal}R$ {s}"
-
-
-def parse_valor(txt) -> float:
-    if txt is None or txt == "":
-        return 0.0
-    try:
-        t = str(txt).replace("R$", "").replace("r$", "").strip()
-        if "," in t and "." in t:
-            t = t.replace(".", "").replace(",", ".")
-        elif "," in t:
-            t = t.replace(",", ".")
-        return round(float(t), 2)
-    except Exception:
-        return 0.0
-
-
-def parse_data(valor) -> Optional[date]:
-    if not valor or (isinstance(valor, float) and pd.isna(valor)):
-        return None
-    s = str(valor).split()[0].strip()
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y"):
-        try:
-            return datetime.strptime(s, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def mes_competencia(d: date, forma: str) -> str:
-    """Cartão: <7 → mês anterior; >=7 → mês atual. Outras formas: mês real."""
-    if "Cartão" not in str(forma):
-        return d.strftime("%Y-%m")
-    base = d - relativedelta(months=1) if d.day < 7 else d
-    return base.strftime("%Y-%m")
-
-
-def rotulo_mes(mes_str: str) -> str:
-    try:
-        dt = datetime.strptime(mes_str, "%Y-%m")
-        meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
-                 "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
-        return f"{meses[dt.month - 1]}/{dt.year}"
-    except Exception:
-        return mes_str
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# CONEXÃO GOOGLE SHEETS (cacheada)
-# ──────────────────────────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner="🔌 Conectando à planilha…")
-def conectar():
-    scope = ["https://www.googleapis.com/auth/spreadsheets",
-             "https://www.googleapis.com/auth/drive"]
-    if "google_credentials" not in st.secrets:
-        return None, "Segredo 'google_credentials' ausente."
-    try:
-        creds_json = json.loads(st.secrets["google_credentials"])
-        if "private_key" in creds_json:
-            k = creds_json["private_key"].replace("\\n", "\n")
-            if k.startswith('"') and k.endswith('"'):
-                k = k[1:-1]
-            creds_json["private_key"] = k
-        creds = Credentials.from_service_account_info(creds_json, scopes=scope)
-        client = gspread.authorize(creds)
-        plan = client.open_by_key(PLANILHA_ID)
-        sheet = plan.worksheet(ABA_LANCAMENTOS)
-        # garante aba de orçamentos
-        try:
-            plan.worksheet(ABA_ORCAMENTOS)
-        except gspread.WorksheetNotFound:
-            nova = plan.add_worksheet(title=ABA_ORCAMENTOS, rows=100, cols=3)
-            nova.append_row(["Categoria", "Teto_Mensal", "Atualizado_Em"])
-        return (plan, sheet), None
-    except Exception as e:
-        return None, f"Erro de conexão: {e}"
-
-
-@st.cache_data(ttl=120, show_spinner="📥 Carregando lançamentos…")
-def carregar_lancamentos(_sheet) -> pd.DataFrame:
-    rows = _sheet.get_all_records()
-    if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows)
-
-
-@st.cache_data(ttl=120, show_spinner="🎯 Carregando orçamentos…")
-def carregar_orcamentos(_plan) -> pd.DataFrame:
-    try:
-        ws = _plan.worksheet(ABA_ORCAMENTOS)
-        df = pd.DataFrame(ws.get_all_records())
-        if df.empty:
-            return pd.DataFrame(columns=["Categoria", "Teto_Mensal", "Atualizado_Em"])
-        df["Teto_Mensal"] = df["Teto_Mensal"].apply(parse_valor)
-        return df
-    except Exception:
-        return pd.DataFrame(columns=["Categoria", "Teto_Mensal", "Atualizado_Em"])
-
-
-def limpar_cache_dados():
-    carregar_lancamentos.clear()
-    carregar_orcamentos.clear()
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# PROJEÇÃO (vetorizada o quanto possível)
-# ──────────────────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=120, show_spinner="📊 Projetando parcelas e assinaturas…")
-def projetar(df_bruto: pd.DataFrame, hoje: date) -> tuple[pd.DataFrame, list[str]]:
-    """
-    Retorna:
-      - df_proj: 1 linha por (lançamento, parcela/mês). NÃO explodido por responsável.
-                 Coluna Responsaveis = lista; Valor_Parcela = valor já dividido por nº de parcelas.
-      - avisos: linhas inválidas para diagnóstico.
-    """
-    if df_bruto.empty:
-        return pd.DataFrame(), []
-
-    df = df_bruto.copy()
-    df.columns = [c.strip() for c in df.columns]
-    avisos: list[str] = []
-
-    df["_Data"] = df["Data"].apply(parse_data)
-    invalidas = df[df["_Data"].isna()]
-    if not invalidas.empty:
-        avisos.append(f"{len(invalidas)} lançamento(s) com data inválida foram ignorados.")
-    df = df[df["_Data"].notna()].copy()
-
-    df["_Valor"] = df["Valor"].apply(parse_valor)
-    df["_Tipo"] = df.get("Tipo", "Gasto Variável").fillna("Gasto Variável")
-    df["_Forma"] = df.get("Forma_Pagamento", "Dinheiro").fillna("Dinheiro")
-    df["_Parc"] = pd.to_numeric(df.get("Parcelas_Totais", 1), errors="coerce").fillna(1).astype(int).clip(lower=1)
-    df["_ParceladoFlag"] = df.get("Parcelado", "Não").astype(str).str.lower().eq("sim")
-    df["_Parc"] = np.where(df["_ParceladoFlag"], df["_Parc"], 1)
-
-    def split_resp(s):
-        lst = [r.strip() for r in str(s or "Jonathan").split(",") if r.strip()]
-        return lst or ["Jonathan"]
-    df["_Resp"] = df.get("Responsavel", "Jonathan").apply(split_resp)
-
-    limite_futuro = hoje + relativedelta(months=12)
-    limite_passado_assin = hoje - relativedelta(months=24)  # cobre histórico recente
-
-    registros = []
-    for r in df.itertuples(index=False):
-        dt_compra: date = r._Data
-        val_total = float(r._Valor)
-        n_parc = int(r._Parc)
-        val_parc = val_total / n_parc if n_parc > 0 else val_total
-
-        if r._Tipo == "Assinatura":
-            # gera meses do max(data compra, hoje-24m) até hoje+12m
-            inicio = max(dt_compra, limite_passado_assin.replace(day=dt_compra.day if dt_compra.day <= 28 else 28))
-            # iterações mensais
-            cur = inicio
-            i = 0
-            while cur <= limite_futuro and i < 60:
-                registros.append({
-                    "Data": dt_compra,
-                    "Descricao": r.Descricao if hasattr(r, "Descricao") else "",
-                    "Categoria": getattr(r, "Categoria", ""),
-                    "Tipo": r._Tipo,
-                    "Forma_Pagamento": r._Forma,
-                    "Responsaveis": r._Resp,
-                    "Parcela_Atual": "Recorrente",
-                    "Valor_Parcela": val_parc,
-                    "Mes_Fatura": mes_competencia(cur, r._Forma),
-                    "Eh_Futuro": cur > hoje,
-                })
-                cur = cur + relativedelta(months=1)
-                i += 1
-        else:
-            for p in range(n_parc):
-                dt_parc = dt_compra + relativedelta(months=p)
-                registros.append({
-                    "Data": dt_compra,
-                    "Descricao": getattr(r, "Descricao", ""),
-                    "Categoria": getattr(r, "Categoria", ""),
-                    "Tipo": r._Tipo,
-                    "Forma_Pagamento": r._Forma,
-                    "Responsaveis": r._Resp,
-                    "Parcela_Atual": f"{p+1}/{n_parc}" if n_parc > 1 else "1/1",
-                    "Valor_Parcela": val_parc,
-                    "Mes_Fatura": mes_competencia(dt_parc, r._Forma),
-                    "Eh_Futuro": dt_parc > hoje,
-                })
-
-    df_proj = pd.DataFrame(registros)
-    return df_proj, avisos
-
-
-def explodir_responsaveis(df_proj: pd.DataFrame) -> pd.DataFrame:
-    """Para visões 'por pessoa': divide o valor pelo nº de responsáveis."""
-    if df_proj.empty:
-        return df_proj
-    df = df_proj.copy()
-    df["_n"] = df["Responsaveis"].apply(len)
-    df["Valor_Pessoa"] = df["Valor_Parcela"] / df["_n"]
-    df = df.explode("Responsaveis").rename(columns={"Responsaveis": "Responsavel"})
-    return df
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# CSS LEVE
-# ──────────────────────────────────────────────────────────────────────────────
+# Estilização CSS personalizada para visual premium, animações fluidas e cores Indigo/Emerald
 st.markdown("""
 <style>
-.main-title{background:linear-gradient(90deg,#312e81,#047857);-webkit-background-clip:text;
--webkit-text-fill-color:transparent;font-size:30px;font-weight:800;margin-bottom:0;}
-.subtitle{color:#64748b;margin-top:0;margin-bottom:18px;}
-.insight-box{background:linear-gradient(135deg,#f0fdf4 0%,#eef2ff 100%);
-border-left:4px solid #10b981;padding:14px 18px;border-radius:8px;margin:8px 0;
-font-size:14px;color:#1e293b;}
-.alert-box{background:#fef2f2;border-left:4px solid #ef4444;padding:14px 18px;
-border-radius:8px;margin:8px 0;font-size:14px;color:#7f1d1d;}
-div[data-testid="stMetric"]{background:#ffffff;padding:14px;border-radius:10px;
-box-shadow:0 1px 3px rgba(0,0,0,0.08);border:1px solid #e2e8f0;}
-div[data-testid="stMetricLabel"]{font-weight:600;color:#475569;}
-.stTabs [data-baseweb="tab-list"]{gap:4px;}
-.stTabs [data-baseweb="tab"]{background:#f1f5f9;border-radius:8px 8px 0 0;
-padding:8px 14px;font-weight:600;color:#475569;}
-.stTabs [aria-selected="true"]{background:#312e81!important;color:#fff!important;}
+    /* Transições e animações fluidas (Cúbico de Entrada 500ms) */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #f1f5f9;
+        border-radius: 8px 8px 0px 0px;
+        gap: 4px;
+        padding: 10px 16px;
+        font-weight: 600;
+        color: #475569;
+        transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #e2e8f0;
+        color: #1e1b4b;
+    }
+
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        background-color: #312e81;
+        color: #ffffff !important;
+        border-bottom: 3px solid #10b981;
+    }
+
+    /* Cards de KPI personalizados com gradientes, sombras físicas e hover */
+    .kpi-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        height: 100%;
+        color: white;
+    }
+
+    .kpi-container:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    }
+
+    .kpi-entradas {
+        background: linear-gradient(135deg, #064e3b 0%, #065f46 100%); /* Emerald escuro */
+        border-left: 5px solid #34d399;
+    }
+
+    .kpi-saidas {
+        background: linear-gradient(135deg, #4c1d95 0%, #5b21b6 100%); /* Purple/Indigo escuro */
+        border-left: 5px solid #a78bfa;
+    }
+
+    .kpi-nu {
+        background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%); /* Deep Indigo */
+        border-left: 5px solid #818cf8;
+    }
+
+    .kpi-bb {
+        background: linear-gradient(135deg, #111827 0%, #1f2937 100%); /* Gray/Dark */
+        border-left: 5px solid #fbbf24;
+    }
+
+    .kpi-title {
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.9;
+        font-weight: 500;
+    }
+
+    .kpi-value {
+        font-size: 26px;
+        font-weight: 700;
+        margin-top: 8px;
+        margin-bottom: 4px;
+    }
+
+    .kpi-subtitle {
+        font-size: 12px;
+        opacity: 0.8;
+    }
+
+    /* Título com gradiente elegante */
+    .main-title {
+        background: linear-gradient(to right, #312e81, #047857);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-size: 32px;
+        font-weight: 800;
+        margin-bottom: 5px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
+# FUNÇÃO DE CONVERSÃO BRASILEIRA DE MOEDA
+def formatar_brl(valor):
+    try:
+        val = float(valor)
+        return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return "R$ 0,00"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# HEADER
-# ──────────────────────────────────────────────────────────────────────────────
-HOJE = hoje_br()
-st.markdown('<div class="main-title">💰 Controle Financeiro Familiar</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Jonathan Prado · visão completa de receitas, despesas e saldo</div>',
-            unsafe_allow_html=True)
+# TRATAMENTO NUMÉRICO DE ENTRADA
+def tratar_entrada_numerica(texto_valor):
+    if not texto_valor:
+        return 0.0
+    try:
+        texto_limpo = str(texto_valor).replace("R$", "").replace("r$", "").strip()
+        if "," in texto_limpo and "." in texto_limpo:
+            texto_limpo = texto_limpo.replace(".", "").replace(",", ".")
+        elif "," in texto_limpo:
+            texto_limpo = texto_limpo.replace(",", ".")
+        val_float = float(texto_limpo)
+        return round(val_float, 2)
+    except Exception:
+        return 0.0
 
-# Fechamento de faturas
-venc = date(HOJE.year, HOJE.month, 7)
-if HOJE.day >= 7:
-    venc = venc + relativedelta(months=1)
-dias_restantes = (venc - HOJE).days
-st.info(f"⏳ **Fechamento das faturas:** faltam **{dias_restantes} dias** "
-        f"(corte em 06/{venc.strftime('%m/%Y')} às 23:59)")
+# CONEXÃO COM O GOOGLE SHEETS COM DIAGNÓSTICO DETALHADO
+def conectar_planilha():
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    
+    if "google_credentials" not in st.secrets:
+        st.error("❌ **Erro de Configuração:** O segredo `google_credentials` não foi encontrado no painel de Secrets do Streamlit.")
+        return None
+        
+    try:
+        try:
+            creds_json = json.loads(st.secrets["google_credentials"])
+        except Exception as json_err:
+            st.error(f"❌ **Erro no Formato das Credenciais (JSON Inválido):** {json_err}")
+            return None
+        
+        if "private_key" in creds_json:
+            key_formatada = creds_json["private_key"].replace("\\n", "\n")
+            if key_formatada.startswith('"') and key_formatada.endswith('"'):
+                key_formatada = key_formatada[1:-1]
+            creds_json["private_key"] = key_formatada
+        
+        try:
+            creds = Credentials.from_service_account_info(creds_json, scopes=scope)
+            client = gspread.authorize(creds)
+        except Exception as auth_err:
+            st.error(f"❌ **Erro de Autenticação com o Google:** {auth_err}")
+            return None
+            
+        planilha_id = "1JyVUY1pKQs90jtPPBvEHDLnGxBw3wdooEFWSq-1e5D4"
+        try:
+            plan_aberta = client.open_by_key(planilha_id)
+        except Exception as open_err:
+            email_servico = creds_json.get("client_email", "e-mail desconhecido")
+            st.error(f"❌ **Planilha não compartilhada com a API:** Compartilhe com `{email_servico}`")
+            return None
+            
+        try:
+            sheet = plan_aberta.worksheet("Lancamentos")
+            return sheet
+        except Exception as sheet_err:
+            st.error("❌ **Aba 'Lancamentos' não encontrada na planilha!**")
+            return None
+            
+    except Exception as e:
+        st.error(f"❌ **Erro Inesperado na Conexão:** {e}")
+        return None
 
-# Conexão
-conn, erro = conectar()
-if erro:
-    st.error(f"❌ {erro}")
-    st.stop()
-plan, sheet = conn
+sheet_conn = conectar_planilha()
 
+# LÓGICA DE COBRANÇA DA FATURA (REGRA SOLICITADA POR JONATHAN)
+# Compra em Cartão:
+# Dia 01 até Dia 06 -> Pertence à fatura do MÊS ANTERIOR.
+# Dia 07 em diante -> Pertence à fatura do MÊS ATUAL.
+# Outras formas (Pix, Dinheiro, etc): Mês real do calendário.
+def calcular_mes_competencia(data_compra, forma_pagamento):
+    if "Cartão" not in forma_pagamento:
+        return data_compra.strftime("%Y-%m")
+    
+    dia = data_compra.day
+    if dia < 7:
+        # Se for entre o dia 1 e dia 6, retrocede 1 mês (Fatura do mês anterior)
+        data_fatura = data_compra - relativedelta(months=1)
+    else:
+        # Se for dia 7 em diante, pertence à fatura do mês atual da compra
+        data_fatura = data_compra
+        
+    return data_fatura.strftime("%Y-%m")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# TABS
-# ──────────────────────────────────────────────────────────────────────────────
-tab_novo, tab_dash, tab_parc, tab_cat, tab_orc, tab_aj = st.tabs([
-    "📲 Novo Lançamento",
-    "📊 Dashboard & Resumo",
-    "💳 Parcelas & Assinaturas",
-    "📂 Categorias & Métodos",
-    "🎯 Orçamento",
-    "✏️ Ajustar",
-])
-
-# ============================================================================
-# TAB 1 — NOVO LANÇAMENTO
-# ============================================================================
-with tab_novo:
-    st.subheader("Registrar gasto ou entrada")
-    tipo = st.selectbox("Tipo de Lançamento", list(CATEGORIAS_POR_TIPO.keys()))
-    lista_cats = CATEGORIAS_POR_TIPO[tipo]
-
-    with st.form("form_lanc", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            data_l = st.date_input("Data", HOJE, format="DD/MM/YYYY")
-            descricao = st.text_input("Descrição",
-                                      placeholder="Ex: Sorveteria Sávio, Mercado Muffato")
-            valor_txt = st.text_input("Valor (R$)", value="0,00",
-                                      help="Use vírgula para centavos. Ex: 8,99")
-        with c2:
-            categoria = st.selectbox("Categoria", lista_cats)
-            responsavel = st.multiselect("Para Quem?", RESPONSAVEIS, default=["Jonathan"])
-            forma = st.selectbox("Forma de Pagamento", FORMAS_PAGAMENTO)
-            pode_parcelar = tipo in ["Gasto Variável", "Gasto Fixo"]
-            if pode_parcelar:
-                parcelado = st.radio("Parcelada?", ["Não", "Sim"], horizontal=True)
-                n_parc = st.number_input("Nº de Parcelas", 2, 48, 2, 1) if parcelado == "Sim" else 1
-            else:
-                parcelado, n_parc = "Não", 1
-
-        salvar = st.form_submit_button("🚀 Gravar na Planilha", use_container_width=True)
-
-        if salvar:
-            val = parse_valor(valor_txt)
-            if not responsavel:
-                st.error("Selecione ao menos um responsável.")
-            elif not descricao or val <= 0:
-                st.error("Preencha descrição e valor maior que zero (ex: 8,99).")
-            else:
-                registro = [
-                    str(data_l), descricao,
-                    f"{val:.2f}".replace(".", ","),
-                    categoria, tipo, ", ".join(responsavel),
-                    forma, parcelado, int(n_parc),
-                ]
+@st.cache_data(ttl=60)
+def projetar(df, hoje):
+    """
+    Função de projeção ultra robusta que previne AttributeError ao converter tuplas
+    nomeadas em dicionários flexíveis para busca de atributos.
+    """
+    if df.empty:
+        return pd.DataFrame(), []
+        
+    lista_projetada = []
+    avisos = []
+    
+    # Normaliza nomes de colunas para evitar espaços indesejados
+    df.columns = [col.strip() for col in df.columns]
+    
+    for r in df.itertuples(index=False):
+        # Converte em dict para evitar erros como r._Data ou r._Valor
+        r_dict = r._asdict()
+        
+        # Procura coluna de data com fallbacks
+        data_raw = None
+        for key in ['Data', '_Data', 'data', '_data']:
+            if key in r_dict:
+                data_raw = r_dict[key]
+                break
+        if data_raw is None:
+            # Fallback para o primeiro elemento disponível
+            data_raw = r_dict[list(r_dict.keys())[0]] if r_dict else None
+            
+        if not data_raw:
+            continue
+            
+        # Parseia a data com resiliência
+        dt_compra = None
+        try:
+            dt_compra = datetime.strptime(str(data_raw).split()[0], "%Y-%m-%d").date()
+        except Exception:
+            try:
+                dt_compra = datetime.strptime(str(data_raw).split()[0], "%d/%m/%Y").date()
+            except Exception:
+                continue
+                
+        # Procura coluna de valor com fallbacks
+        valor_raw = 0.0
+        for key in ['Valor', '_Valor', 'valor', '_valor']:
+            if key in r_dict:
+                valor_raw = r_dict[key]
+                break
+                
+        if isinstance(valor_raw, str):
+            valor_total = tratar_entrada_numerica(valor_raw)
+        else:
+            valor_total = float(valor_raw)
+            
+        # Procura coluna de tipo
+        tipo_lanc = 'Gasto Variável'
+        for key in ['Tipo', '_Tipo', 'tipo', '_tipo']:
+            if key in r_dict:
+                tipo_lanc = str(r_dict[key])
+                break
+                
+        # Procura parcelas totais
+        total_parc = 1
+        for key in ['Parcelas_Totais', '_Parcelas_Totais', 'ParcelasTotais', 'parcelas_totais']:
+            if key in r_dict:
                 try:
-                    sheet.append_row(registro, value_input_option="USER_ENTERED")
-                    limpar_cache_dados()
-                    st.success(f"✅ '{descricao}' gravado: {brl(val)}")
-                    st.balloons()
-                except Exception as e:
-                    st.error(f"Erro ao gravar: {e}")
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# CARREGAMENTO DE DADOS (apenas se houver lançamentos)
-# ──────────────────────────────────────────────────────────────────────────────
-df_bruto = carregar_lancamentos(sheet)
-df_orc = carregar_orcamentos(plan)
-
-if df_bruto.empty:
-    with tab_dash:
-        st.info("Nenhum lançamento ainda. Use a aba **Novo Lançamento** para começar.")
-    st.stop()
-
-df_proj, avisos = projetar(df_bruto, HOJE)
-if avisos:
-    with st.expander("⚠️ Diagnóstico"):
-        for a in avisos:
-            st.warning(a)
-
-if df_proj.empty:
-    with tab_dash:
-        st.info("Sem dados projetados para exibir.")
-    st.stop()
-
-df_pessoa = explodir_responsaveis(df_proj)
-
-
-# ============================================================================
-# TAB 2 — DASHBOARD & RESUMO
-# ============================================================================
-with tab_dash:
-    meses = sorted(df_proj["Mes_Fatura"].unique())
-    mes_atual = HOJE.strftime("%Y-%m")
-    idx_def = meses.index(mes_atual) if mes_atual in meses else len(meses) - 1
-    mes_sel = st.selectbox("📅 Mês de competência",
-                           meses, index=idx_def,
-                           format_func=rotulo_mes)
-
-    df_mes = df_proj[df_proj["Mes_Fatura"] == mes_sel]
-    df_mes_pessoa = df_pessoa[df_pessoa["Mes_Fatura"] == mes_sel]
-
-    # KPIs
-    entradas = df_mes.loc[df_mes["Tipo"] == "Entrada", "Valor_Parcela"].sum()
-    despesas = df_mes.loc[df_mes["Tipo"] != "Entrada", "Valor_Parcela"].sum()
-    saldo = entradas - despesas
-    fat_nu = df_mes.loc[(df_mes["Forma_Pagamento"] == "Cartão Nu") &
-                        (df_mes["Tipo"] != "Entrada"), "Valor_Parcela"].sum()
-    fat_bb = df_mes.loc[(df_mes["Forma_Pagamento"] == "Cartão BB") &
-                        (df_mes["Tipo"] != "Entrada"), "Valor_Parcela"].sum()
-
-    # Variação vs mês anterior
-    idx_sel = meses.index(mes_sel)
-    delta_str = None
-    if idx_sel > 0:
-        mes_ant = meses[idx_sel - 1]
-        desp_ant = df_proj.loc[(df_proj["Mes_Fatura"] == mes_ant) &
-                               (df_proj["Tipo"] != "Entrada"), "Valor_Parcela"].sum()
-        if desp_ant > 0:
-            var = (despesas - desp_ant) / desp_ant * 100
-            delta_str = f"{var:+.1f}% vs {rotulo_mes(mes_ant)}"
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("🟢 Entradas", brl(entradas))
-    k2.metric("🔴 Despesas", brl(despesas), delta=delta_str, delta_color="inverse")
-    k3.metric("💰 Saldo", brl(saldo),
-              delta="positivo" if saldo >= 0 else "negativo",
-              delta_color="normal" if saldo >= 0 else "inverse")
-    k4.metric("💳 Faturas (Nu + BB)", brl(fat_nu + fat_bb),
-              delta=f"Nu {brl(fat_nu)} · BB {brl(fat_bb)}")
-
-    # ── Resumo inteligente
-    insights = []
-    df_desp = df_mes[df_mes["Tipo"] != "Entrada"]
-    if not df_desp.empty:
-        top_cat = df_desp.groupby("Categoria")["Valor_Parcela"].sum().sort_values(ascending=False)
-        pct = top_cat.iloc[0] / despesas * 100 if despesas > 0 else 0
-        insights.append(f"📌 Maior categoria: **{top_cat.index[0]}** com "
-                        f"**{brl(top_cat.iloc[0])}** ({pct:.0f}% das despesas).")
-    if delta_str:
-        seta = "📈" if despesas > desp_ant else "📉"
-        insights.append(f"{seta} Despesas **{delta_str}**.")
-    insights.append(f"⏳ Faltam **{dias_restantes} dias** para o fechamento das faturas.")
-
-    # Saldo projetado considerando meses futuros
-    futuro = df_proj[(df_proj["Mes_Fatura"] > mes_sel) & (df_proj["Tipo"] != "Entrada")]
-    if not futuro.empty:
-        comp_futuro = futuro["Valor_Parcela"].sum()
-        insights.append(f"🔮 Compromissos futuros já lançados: **{brl(comp_futuro)}** "
-                        f"em {futuro['Mes_Fatura'].nunique()} mês(es).")
-
-    # Alertas de orçamento do mês
-    alertas_orc = []
-    if not df_orc.empty and not df_desp.empty:
-        gasto_cat = df_desp.groupby("Categoria")["Valor_Parcela"].sum()
-        for _, row in df_orc.iterrows():
-            cat, teto = row["Categoria"], row["Teto_Mensal"]
-            if teto <= 0:
-                continue
-            gasto = gasto_cat.get(cat, 0)
-            pct = gasto / teto * 100
-            if pct >= 90:
-                alertas_orc.append(f"⛔ **{cat}**: {brl(gasto)} / {brl(teto)} ({pct:.0f}%)")
-            elif pct >= 70:
-                alertas_orc.append(f"🟡 **{cat}**: {brl(gasto)} / {brl(teto)} ({pct:.0f}%)")
-
-    for txt in insights:
-        st.markdown(f'<div class="insight-box">{txt}</div>', unsafe_allow_html=True)
-    for txt in alertas_orc:
-        st.markdown(f'<div class="alert-box">{txt}</div>', unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.markdown("### 📈 Visualizações")
-
-    g1, g2 = st.columns(2)
-
-    # Donut categorias
-    with g1:
-        st.markdown("**Gastos por Categoria**")
-        if not df_desp.empty:
-            dfc = df_desp.groupby("Categoria")["Valor_Parcela"].sum().reset_index()
-            fig = px.pie(dfc, values="Valor_Parcela", names="Categoria",
-                         hole=0.55, color_discrete_sequence=PALETA)
-            fig.update_traces(
-                textinfo="percent+label",
-                hovertemplate="<b>%{label}</b><br>%{value:,.2f}<br>%{percent}<extra></extra>",
-            )
-            fig.add_annotation(text=f"<b>{brl(despesas)}</b><br><span style='font-size:11px;color:#64748b'>Total</span>",
-                               showarrow=False, font_size=15)
-            fig.update_layout(showlegend=False, height=340,
-                              margin=dict(t=10, b=10, l=10, r=10),
-                              transition_duration=400)
-            st.plotly_chart(fig, use_container_width=True,
-                            config={"displayModeBar": False})
+                    total_parc = int(r_dict[key])
+                except Exception:
+                    total_parc = 1
+                break
+        if total_parc < 1:
+            total_parc = 1
+            
+        # Procura responsável
+        resp_raw = 'Jonathan'
+        for key in ['Responsavel', '_Responsavel', 'responsavel', '_responsavel']:
+            if key in r_dict:
+                resp_raw = str(r_dict[key])
+                break
+                
+        responsaveis_list = [resp.strip() for resp in resp_raw.split(",") if resp.strip()]
+        if not responsaveis_list:
+            responsaveis_list = ["Jonathan"]
+            
+        divisao_pessoas = len(responsaveis_list)
+        
+        # Procura forma de pagamento
+        forma_pagto = 'Dinheiro'
+        for key in ['Forma_Pagamento', '_Forma_Pagamento', 'forma_pagto', 'forma_pagamento']:
+            if key in r_dict:
+                forma_pagto = str(r_dict[key])
+                break
+                
+        # Procura se está parcelado
+        parcelado_str = 'Não'
+        for key in ['Parcelado', '_Parcelado', 'parcelado']:
+            if key in r_dict:
+                parcelado_str = str(r_dict[key])
+                break
+                
+        # Projeção de assinaturas para os próximos 12 meses
+        if tipo_lanc == "Assinatura":
+            for m in range(12):
+                dt_recorrente = dt_compra + relativedelta(months=m)
+                mes_competencia = calcular_mes_competencia(dt_recorrente, forma_pagto)
+                
+                for resp in responsaveis_list:
+                    item_proj = r_dict.copy()
+                    item_proj['Mes_Fatura'] = mes_competencia
+                    item_proj['Valor_Parcela'] = valor_total / divisao_pessoas
+                    item_proj['Responsavel_Dividido'] = resp
+                    item_proj['Parcela_Atual'] = "Recorrente"
+                    item_proj['Data_Parsed'] = dt_recorrente
+                    lista_projetada.append(item_proj)
         else:
-            st.info("Sem gastos no mês.")
+            # Compras normais e parceladas
+            val_parcela = valor_total / total_parc if parcelado_str == 'Sim' else valor_total
+            for p in range(total_parc):
+                dt_parcela = dt_compra + relativedelta(months=p)
+                mes_competencia = calcular_mes_competencia(dt_parcela, forma_pagto)
+                
+                for resp in responsaveis_list:
+                    item_proj = r_dict.copy()
+                    item_proj['Mes_Fatura'] = mes_competencia
+                    item_proj['Valor_Parcela'] = val_parcela / divisao_pessoas
+                    item_proj['Responsavel_Dividido'] = resp
+                    item_proj['Parcela_Atual'] = f"{p+1}/{total_parc}" if parcelado_str == 'Sim' else "1/1"
+                    item_proj['Data_Parsed'] = dt_parcela
+                    lista_projetada.append(item_proj)
+                    
+    df_proj = pd.DataFrame(lista_projetada)
+    return df_proj, avisos
 
-    # Barras formas de pagamento
-    with g2:
-        st.markdown("**Formas de Pagamento**")
-        if not df_desp.empty:
-            dff = (df_desp.groupby("Forma_Pagamento")["Valor_Parcela"].sum()
-                   .sort_values(ascending=True).reset_index())
-            fig = px.bar(dff, x="Valor_Parcela", y="Forma_Pagamento",
-                         orientation="h", text="Valor_Parcela",
-                         color="Valor_Parcela",
-                         color_continuous_scale=["#a5b4fc", "#312e81"])
-            fig.update_traces(
-                texttemplate="R$ %{text:,.2f}", textposition="outside",
-                hovertemplate="<b>%{y}</b><br>%{x:,.2f}<extra></extra>",
-            )
-            fig.update_layout(xaxis_title="", yaxis_title="",
-                              coloraxis_showscale=False, height=340,
-                              margin=dict(t=10, b=10, l=10, r=40),
-                              transition_duration=400)
-            st.plotly_chart(fig, use_container_width=True,
-                            config={"displayModeBar": False})
-        else:
-            st.info("Sem dados.")
+# INTERFACE DO USUÁRIO
+st.markdown('<div class="main-title">💰 Controle Financeiro Familiar</div>', unsafe_allow_html=True)
+st.markdown("### Jonathan Prado")
 
-    # Linha temporal
-    st.markdown("**Evolução Mensal (Entradas × Despesas × Saldo)**")
-    df_ev = df_proj.copy()
-    df_ev["GrupoTipo"] = np.where(df_ev["Tipo"] == "Entrada", "Entrada", "Despesa")
-    pv = (df_ev.groupby(["Mes_Fatura", "GrupoTipo"])["Valor_Parcela"].sum()
-          .unstack(fill_value=0.0).reset_index())
-    if "Entrada" not in pv.columns: pv["Entrada"] = 0.0
-    if "Despesa" not in pv.columns: pv["Despesa"] = 0.0
-    pv["Saldo"] = pv["Entrada"] - pv["Despesa"]
-    pv["Label"] = pv["Mes_Fatura"].apply(rotulo_mes)
-    pv["Futuro"] = pv["Mes_Fatura"] > mes_atual
+# Lógica de contagem de fechamento baseada na data de SP
+vencimento_limite = date(hoje_brasil.year, hoje_brasil.month, 7)
+if hoje_brasil.day >= 7:
+    vencimento_limite = vencimento_limite + relativedelta(months=1)
+dias_restantes = (vencimento_limite - hoje_brasil).days
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=pv["Label"], y=pv["Entrada"], name="🟢 Entradas",
-                             line=dict(color=CORES["entrada"], width=3),
-                             mode="lines+markers",
-                             hovertemplate="%{x}<br>Entradas: R$ %{y:,.2f}<extra></extra>"))
-    fig.add_trace(go.Scatter(x=pv["Label"], y=pv["Despesa"], name="🔴 Despesas",
-                             line=dict(color=CORES["saida"], width=3),
-                             mode="lines+markers",
-                             hovertemplate="%{x}<br>Despesas: R$ %{y:,.2f}<extra></extra>"))
-    fig.add_trace(go.Scatter(x=pv["Label"], y=pv["Saldo"], name="💰 Saldo",
-                             line=dict(color=CORES["indigo"], width=3, dash="dot"),
-                             mode="lines+markers", fill="tozeroy",
-                             fillcolor="rgba(49,46,129,0.08)",
-                             hovertemplate="%{x}<br>Saldo: R$ %{y:,.2f}<extra></extra>"))
-    # zona futura
-    futuros = pv[pv["Futuro"]]
-    if not futuros.empty:
-        fig.add_vrect(x0=futuros["Label"].iloc[0], x1=futuros["Label"].iloc[-1],
-                      fillcolor="rgba(148,163,184,0.10)", line_width=0,
-                      annotation_text="Projeção", annotation_position="top left")
-    fig.update_layout(height=340, margin=dict(t=30, b=10, l=10, r=10),
-                      legend=dict(orientation="h", y=1.1, x=1, xanchor="right"),
-                      hovermode="x unified", transition_duration=400)
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+st.info(f"⏳ **Fechamento de Faturas:** Faltam **{dias_restantes} dias** para o fechamento dos cartões (Fechamento em 06/{vencimento_limite.strftime('%m/%Y')} às 23:59)")
 
-    # Por responsável + Treemap
-    g3, g4 = st.columns(2)
-    with g3:
-        st.markdown("**Gastos por Pessoa (proporcional)**")
-        df_p = df_mes_pessoa[df_mes_pessoa["Tipo"] != "Entrada"]
-        if not df_p.empty:
-            dfr = df_p.groupby("Responsavel")["Valor_Pessoa"].sum().reset_index()
-            fig = px.bar(dfr.sort_values("Valor_Pessoa"),
-                         x="Valor_Pessoa", y="Responsavel", orientation="h",
-                         text="Valor_Pessoa", color="Responsavel",
-                         color_discrete_sequence=PALETA)
-            fig.update_traces(texttemplate="R$ %{text:,.2f}", textposition="outside",
-                              hovertemplate="<b>%{y}</b><br>%{x:,.2f}<extra></extra>")
-            fig.update_layout(xaxis_title="", yaxis_title="", showlegend=False,
-                              height=320, margin=dict(t=10, b=10, l=10, r=40))
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-        else:
-            st.info("Sem dados.")
-    with g4:
-        st.markdown("**Mapa: Tipo → Categoria**")
-        if not df_desp.empty:
-            fig = px.treemap(df_desp, path=["Tipo", "Categoria"], values="Valor_Parcela",
-                             color="Valor_Parcela", color_continuous_scale="Tealgrn")
-            fig.update_traces(hovertemplate="<b>%{label}</b><br>R$ %{value:,.2f}<extra></extra>")
-            fig.update_layout(height=320, margin=dict(t=10, b=10, l=10, r=10),
-                              coloraxis_showscale=False)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+tabs = st.tabs(["📲 Novo Lançamento", "📊 Dashboard & Resumos", "💳 Controle de Parcelas & Assinaturas", "✏️ Ajustar Lançamentos"])
 
-    # Extrato
-    st.markdown("---")
-    st.markdown("### 📋 Extrato Detalhado")
-    f1, f2, f3 = st.columns(3)
-    with f1:
-        cat_f = st.multiselect("Categoria", sorted(df_mes["Categoria"].unique()))
-    with f2:
-        forma_f = st.multiselect("Forma de Pagamento", sorted(df_mes["Forma_Pagamento"].unique()))
-    with f3:
-        tipo_f = st.multiselect("Tipo", sorted(df_mes["Tipo"].unique()))
-
-    df_ext = df_mes.copy()
-    if cat_f:   df_ext = df_ext[df_ext["Categoria"].isin(cat_f)]
-    if forma_f: df_ext = df_ext[df_ext["Forma_Pagamento"].isin(forma_f)]
-    if tipo_f:  df_ext = df_ext[df_ext["Tipo"].isin(tipo_f)]
-
-    df_ext_show = df_ext.assign(
-        Data=df_ext["Data"].apply(lambda d: d.strftime("%d/%m/%Y") if isinstance(d, date) else d),
-        Responsaveis=df_ext["Responsaveis"].apply(lambda x: ", ".join(x)),
-    )[["Data", "Descricao", "Categoria", "Tipo", "Forma_Pagamento",
-       "Responsaveis", "Parcela_Atual", "Valor_Parcela"]]
-
-    st.dataframe(
-        df_ext_show, use_container_width=True, hide_index=True,
-        column_config={
-            "Valor_Parcela": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
-            "Descricao": "Descrição",
-            "Forma_Pagamento": "Forma",
-            "Parcela_Atual": "Parcela",
-        },
-    )
-
-    # Exportar
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        df_ext_show.to_excel(w, index=False, sheet_name=mes_sel)
-    st.download_button(
-        "⬇️ Exportar Excel deste mês", buf.getvalue(),
-        file_name=f"extrato_{mes_sel}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
-
-# ============================================================================
-# TAB 3 — PARCELAS & ASSINATURAS
-# ============================================================================
-with tab_parc:
-    st.subheader("💳 Parcelas em aberto e assinaturas recorrentes")
-    parc_abertas = df_proj[(df_proj["Parcela_Atual"].str.contains("/")) &
-                           (df_proj["Eh_Futuro"])]
-    if parc_abertas.empty:
-        st.info("Nenhuma parcela futura em aberto.")
+# TAB 1: FORMULÁRIO DE LANÇAMENTO (OTIMIZADO PARA BRASIL)
+with tabs[0]:
+    st.subheader("Registrar Gasto ou Entrada")
+    if sheet_conn is None:
+        st.info("⚠️ **O formulário de envio está temporariamente desativado devido a problemas de conexão.**")
     else:
-        df_show = parc_abertas.assign(
-            Responsaveis=parc_abertas["Responsaveis"].apply(lambda x: ", ".join(x))
-        )[["Mes_Fatura", "Descricao", "Categoria", "Forma_Pagamento",
-           "Parcela_Atual", "Valor_Parcela", "Responsaveis"]]
-        st.dataframe(df_show, use_container_width=True, hide_index=True,
-                     column_config={
-                         "Valor_Parcela": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
-                         "Mes_Fatura": "Mês",
-                     })
-
-    st.markdown("### 🔁 Assinaturas ativas")
-    assin = df_bruto[df_bruto.get("Tipo", "") == "Assinatura"]
-    if assin.empty:
-        st.info("Nenhuma assinatura cadastrada.")
-    else:
-        assin_show = assin.assign(Valor_BRL=assin["Valor"].apply(parse_valor))
-        st.dataframe(
-            assin_show[["Descricao", "Categoria", "Valor_BRL", "Forma_Pagamento"]],
-            use_container_width=True, hide_index=True,
-            column_config={"Valor_BRL": st.column_config.NumberColumn("Valor mensal", format="R$ %.2f")},
-        )
-        total_assin = assin_show["Valor_BRL"].sum()
-        st.success(f"💸 Total mensal em assinaturas: **{brl(total_assin)}** · "
-                   f"Anualizado: **{brl(total_assin * 12)}**")
-
-
-# ============================================================================
-# TAB 4 — CATEGORIAS & MÉTODOS
-# ============================================================================
-with tab_cat:
-    st.subheader("📂 Análise por Categoria")
-    df_d = df_proj[df_proj["Tipo"] != "Entrada"]
-    if df_d.empty:
-        st.info("Sem despesas registradas.")
-    else:
-        resumo_cat = df_d.groupby("Categoria").agg(
-            Total=("Valor_Parcela", "sum"),
-            Lancamentos=("Valor_Parcela", "count"),
-            Ticket_Medio=("Valor_Parcela", "mean"),
-            Ultima_Data=("Data", "max"),
-        ).reset_index().sort_values("Total", ascending=False)
-        resumo_cat["Ultima_Data"] = resumo_cat["Ultima_Data"].apply(
-            lambda d: d.strftime("%d/%m/%Y") if isinstance(d, date) else "—")
-        st.dataframe(resumo_cat, use_container_width=True, hide_index=True,
-                     column_config={
-                         "Total": st.column_config.NumberColumn("Total", format="R$ %.2f"),
-                         "Ticket_Medio": st.column_config.NumberColumn("Ticket Médio", format="R$ %.2f"),
-                         "Ultima_Data": "Última ocorrência",
-                     })
-
-    st.markdown("### 💳 Análise por Método de Pagamento")
-    if df_d.empty:
-        st.info("Sem dados.")
-    else:
-        total = df_d["Valor_Parcela"].sum()
-        resumo_m = df_d.groupby("Forma_Pagamento").agg(
-            Total=("Valor_Parcela", "sum"),
-            Lancamentos=("Valor_Parcela", "count"),
-        ).reset_index().sort_values("Total", ascending=False)
-        resumo_m["% do Total"] = (resumo_m["Total"] / total * 100).round(1)
-        st.dataframe(resumo_m, use_container_width=True, hide_index=True,
-                     column_config={
-                         "Total": st.column_config.NumberColumn("Total", format="R$ %.2f"),
-                         "% do Total": st.column_config.NumberColumn("%", format="%.1f%%"),
-                     })
-
-
-# ============================================================================
-# TAB 5 — ORÇAMENTO
-# ============================================================================
-with tab_orc:
-    st.subheader("🎯 Orçamento mensal por categoria")
-    st.caption("Defina um teto para cada categoria. O Dashboard alertará quando passar de 70% e 90%.")
-
-    todas_cats = sorted({c for cats in CATEGORIAS_POR_TIPO.values() for c in cats
-                         if not c.startswith("Salário") and not c.startswith("Pix Recebido")
-                         and not c.startswith("Rendimento") and not c.startswith("Outras Entradas")})
-
-    orc_dict = dict(zip(df_orc.get("Categoria", []), df_orc.get("Teto_Mensal", [])))
-
-    with st.form("form_orc"):
-        novos = {}
-        col_a, col_b = st.columns(2)
-        for i, cat in enumerate(todas_cats):
-            target = col_a if i % 2 == 0 else col_b
-            atual = float(orc_dict.get(cat, 0) or 0)
-            with target:
-                novos[cat] = st.text_input(
-                    f"{cat}", value=f"{atual:.2f}".replace(".", ",") if atual > 0 else "",
-                    placeholder="0,00", key=f"orc_{cat}",
+        # Reatividade instantânea na troca de categorias fora do st.form
+        tipo = st.selectbox("Tipo de Lançamento", ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"])
+        
+        # Define a lista de categorias baseado no Tipo selecionado
+        if tipo == "Gasto Fixo":
+            lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
+        elif tipo == "Gasto Variável":
+            lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
+        elif tipo == "Assinatura":
+            lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
+        else: 
+            lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
+        
+        # Form de Envio
+        with st.form("form_lancamento", clear_on_submit=True):
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                # Calendário iniciando na data real do fuso de SP
+                data = st.date_input("Data do Lançamento", hoje_brasil, format="DD/MM/YYYY")
+                descricao = st.text_input("Descrição", placeholder="Ex: Sorveteria Sávio, Roupas na Shein, Mercado Muffato")
+                valor_texto = st.text_input("Valor (R$)", value="0,00", help="Use vírgula para centavos. Exemplo: 8,99 ou 150,50")
+            
+            with col2:
+                # Seleção de Categoria dinâmica associada ao Tipo escolhido
+                categoria = st.selectbox("Categoria", lista_cats)
+                
+                responsavel = st.multiselect(
+                    "Para Quem?", 
+                    ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"],
+                    default=["Jonathan"]
                 )
-        salvar_orc = st.form_submit_button("💾 Salvar orçamentos", use_container_width=True)
+                
+                forma_pagto = st.selectbox("Forma de Pagamento", ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"])
+                
+                pode_parcelar = tipo in ["Gasto Variável", "Gasto Fixo"]
+                if pode_parcelar:
+                    parcelado = st.radio("Compra Parcelada?", ["Não", "Sim"], horizontal=True)
+                    if parcelado == "Sim":
+                        num_parcelas = st.number_input("Quantidade de Parcelas", min_value=2, max_value=48, value=2, step=1)
+                    else:
+                        num_parcelas = 1
+                else:
+                    parcelado = "Não"
+                    num_parcelas = 1
+                    
+            botao_salvar = st.form_submit_button("🚀 Gravar na Planilha")
+            
+            if botao_salvar:
+                val_float = tratar_entrada_numerica(valor_texto)
+                
+                if not responsavel:
+                    st.error("Por favor, selecione pelo menos um responsável pelo gasto.")
+                elif descricao and val_float > 0:
+                    resp_salvar = ", ".join(responsavel)
+                    valor_gravar_sheets = f"{val_float:.2f}".replace(".", ",")
+                    
+                    novo_registro = [
+                        str(data), descricao, valor_gravar_sheets, categoria, tipo, 
+                        resp_salvar, forma_pagto, parcelado, int(num_parcelas)
+                    ]
+                    try:
+                        sheet_conn.append_row(novo_registro, value_input_option='USER_ENTERED')
+                        st.success(f"Sucesso! '{descricao}' gravado com o valor de {formatar_brl(val_float)}.")
+                        st.balloons()
+                    except Exception as e:
+                        st.error(f"Erro ao salvar na planilha: {e}")
+                else:
+                    st.error("Por favor, preencha a descrição e um valor decimal válido maior que zero (Exemplo: 8,99).")
 
-        if salvar_orc:
-            try:
-                ws = plan.worksheet(ABA_ORCAMENTOS)
-                ws.clear()
-                ws.append_row(["Categoria", "Teto_Mensal", "Atualizado_Em"])
-                rows = []
-                agora = datetime.now(pytz.timezone("America/Sao_Paulo")).strftime("%Y-%m-%d %H:%M")
-                for cat, txt in novos.items():
-                    val = parse_valor(txt)
-                    if val > 0:
-                        rows.append([cat, f"{val:.2f}".replace(".", ","), agora])
-                if rows:
-                    ws.append_rows(rows, value_input_option="USER_ENTERED")
-                limpar_cache_dados()
-                st.success("✅ Orçamentos atualizados.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erro ao salvar: {e}")
+# INTERPRETAÇÃO E PROJEÇÃO DOS DADOS
+if sheet_conn is not None:
+    try:
+        dados_brutos = pd.DataFrame(sheet_conn.get_all_records())
+    except Exception as e:
+        dados_brutos = pd.DataFrame()
+        st.warning("Aguardando lançamentos na aba 'Lancamentos' para carregar os gráficos.")
 
-    # Visualização atual do mês
-    st.markdown("### Status do mês atual")
-    mes_a = HOJE.strftime("%Y-%m")
-    df_mes_a = df_proj[(df_proj["Mes_Fatura"] == mes_a) & (df_proj["Tipo"] != "Entrada")]
-    gasto_por_cat = df_mes_a.groupby("Categoria")["Valor_Parcela"].sum() if not df_mes_a.empty else pd.Series()
+    if not dados_brutos.empty:
+        # Normalização dos cabeçalhos das colunas
+        dados_brutos.columns = [col.strip() for col in dados_brutos.columns]
+        
+        # Execução da nossa projeção blindada e otimizada (Resolvendo erro AttributeError)
+        df_projetado, avisos_proj = projetar(dados_brutos, hoje_brasil)
+        
+        if not df_projetado.empty:
+            # Traduzir a exibição da data nas tabelas
+            def formatar_data_br(data_str):
+                try:
+                    dt = datetime.strptime(str(data_str).split()[0], "%Y-%m-%d")
+                    return dt.strftime("%d/%m/%Y")
+                except Exception:
+                    return data_str
+            
+            df_projetado['Data_Exibicao'] = df_projetado['Data_Parsed'].apply(formatar_data_br)
+            
+            # TAB 2: DASHBOARD
+            with tabs[1]:
+                st.subheader("Resumo Mensal e Faturas")
+                
+                meses_disponiveis = sorted(df_projetado['Mes_Fatura'].unique())
+                if meses_disponiveis:
+                    # Encontra o mês atual em SP para selecionar dinamicamente como padrão
+                    mes_atual_padrao = hoje_brasil.strftime("%Y-%m")
+                    idx_padrao = meses_disponiveis.index(mes_atual_padrao) if mes_atual_padrao in meses_disponiveis else len(meses_disponiveis)-1
+                    
+                    mes_selecionado = st.selectbox("Selecione o Mês de Análise", meses_disponiveis, index=idx_padrao)
+                    
+                    df_mes = df_projetado[df_projetado['Mes_Fatura'] == mes_selecionado]
+                    
+                    # KPIs Principais do Mês Selecionado
+                    tot_entradas = df_mes[df_mes['Tipo'] == 'Entrada']['Valor_Parcela'].sum()
+                    tot_saidas = df_mes[df_mes['Tipo'] != 'Entrada']['Valor_Parcela'].sum()
+                    
+                    # Faturas Cartões (A nova regra foi aplicada aqui!)
+                    fatura_nu = df_mes[df_mes['Forma_Pagamento'] == 'Cartão Nu']['Valor_Parcela'].sum()
+                    fatura_bb = df_mes[df_mes['Forma_Pagamento'] == 'Cartão BB']['Valor_Parcela'].sum()
+                    
+                    saldo_final = tot_entradas - tot_saidas
+                    
+                    # BLOCOS DE KPI MODERNOS (GRADIENTE, SOMBRA, HOVER)
+                    kpi_c1, kpi_c2, kpi_c3, kpi_c4 = st.columns(4)
+                    
+                    with kpi_c1:
+                        st.markdown(f"""
+                        <div class="kpi-container kpi-entradas">
+                            <div class="kpi-title">🟢 Total Entradas</div>
+                            <div class="kpi-value">{formatar_brl(tot_entradas)}</div>
+                            <div class="kpi-subtitle">Salários & Receitas</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                    with kpi_c2:
+                        st.markdown(f"""
+                        <div class="kpi-container kpi-saidas">
+                            <div class="kpi-title">🔴 Total Despesas</div>
+                            <div class="kpi-value">{formatar_brl(tot_saidas)}</div>
+                            <div class="kpi-subtitle">Balanço: {formatar_brl(saldo_final)} de saldo</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                    with kpi_c3:
+                        st.markdown(f"""
+                        <div class="kpi-container kpi-nu">
+                            <div class="kpi-title">💳 Fatura Nu Bank</div>
+                            <div class="kpi-value">{formatar_brl(fatura_nu)}</div>
+                            <div class="kpi-subtitle">Competência {mes_selecionado}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                    with kpi_c4:
+                        st.markdown(f"""
+                        <div class="kpi-container kpi-bb">
+                            <div class="kpi-title">💳 Fatura BB</div>
+                            <div class="kpi-value">{formatar_brl(fatura_bb)}</div>
+                            <div class="kpi-subtitle">Vence nos próximos dias</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    st.write("---")
+                    
+                    # SEÇÃO DE GRÁFICOS INTERATIVOS PLOTLY
+                    st.markdown("### Visualização de Distribuição e Análise")
+                    
+                    g_col1, g_col2 = st.columns(2)
+                    
+                    with g_col1:
+                        st.markdown("**Gastos por Categoria (Donut Chart com Total)**")
+                        df_gasto_cat = df_mes[df_mes['Tipo'] != 'Entrada'].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
+                        
+                        if not df_gasto_cat.empty:
+                            total_gastos = df_gasto_cat['Valor_Parcela'].sum()
+                            fig_donut = px.pie(
+                                df_gasto_cat, 
+                                values='Valor_Parcela', 
+                                names='Categoria', 
+                                hole=0.5,
+                                color_discrete_sequence=['#059669', '#312e81', '#10b981', '#4f46e5', '#047857', '#4338ca', '#065f46', '#3730a3', '#064e3b', '#6366f1']
+                            )
+                            fig_donut.update_traces(
+                                textinfo='percent+label',
+                                hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:,.2f}<br>Representa: %{percent}<extra></extra>"
+                            )
+                            fig_donut.add_annotation(
+                                text=f"Total<br><b>R$ {total_gastos:,.2f}</b>",
+                                showarrow=False,
+                                font_size=16,
+                                font_color="#1e1b4b"
+                            )
+                            fig_donut.update_layout(
+                                margin=dict(t=10, b=10, l=10, r=10),
+                                showlegend=False,
+                                height=350
+                            )
+                            st.plotly_chart(fig_donut, use_container_width=True)
+                        else:
+                            st.info("Nenhum gasto registrado para gerar gráfico de rosca.")
+                            
+                    with g_col2:
+                        st.markdown("**Balanço de Gastos Dividido (Barras Horizontais em R$)**")
+                        # Gráfico usa a coluna "Responsavel_Dividido" para computar as proporções corretas pós-divisão
+                        df_gasto_resp = df_mes[df_mes['Tipo'] != 'Entrada'].groupby('Responsavel_Dividido')['Valor_Parcela'].sum().reset_index()
+                        
+                        if not df_gasto_resp.empty:
+                            fig_barras = px.bar(
+                                df_gasto_resp,
+                                x='Valor_Parcela',
+                                y='Responsavel_Dividido',
+                                orientation='h',
+                                text='Valor_Parcela',
+                                color='Valor_Parcela',
+                                color_continuous_scale=['#a78bfa', '#312e81']
+                            )
+                            fig_barras.update_traces(
+                                texttemplate='R$ %{text:,.2f}', 
+                                textposition='outside',
+                                hovertemplate="<b>%{y}</b><br>Gasto proporcional: R$ %{x:,.2f}<extra></extra>"
+                            )
+                            fig_barras.update_layout(
+                                xaxis_title="Gasto Total Proporcional",
+                                yaxis_title="Destinatário",
+                                coloraxis_showscale=False,
+                                margin=dict(t=10, b=10, l=10, r=10),
+                                height=350
+                            )
+                            st.plotly_chart(fig_barras, use_container_width=True)
+                        else:
+                            st.info("Sem dados de despesa para exibir no balanço.")
+                    
+                    st.write("---")
+                    
+                    # GRÁFICO 3: EVOLUÇÃO MENSAL
+                    st.markdown("**Histórico de Evolução Mensal (Entradas vs Despesas)**")
+                    
+                    df_evolucao = df_projetado.groupby(['Mes_Fatura', 'Tipo'])['Valor_Parcela'].sum().unstack(fill_value=0.0).reset_index()
+                    
+                    if not df_evolucao.empty:
+                        if 'Entrada' not in df_evolucao.columns: df_evolucao['Entrada'] = 0.0
+                        
+                        colunas_despesas = [c for c in df_evolucao.columns if c != 'Mes_Fatura' and c != 'Entrada']
+                        df_evolucao['Total_Despesas'] = df_evolucao[colunas_despesas].sum(axis=1)
+                        
+                        fig_linhas = go.Figure()
+                        fig_linhas.add_trace(go.Scatter(
+                            x=df_evolucao['Mes_Fatura'], 
+                            y=df_evolucao['Entrada'],
+                            name='🟢 Entradas (Receitas)',
+                            line=dict(color='#10b981', width=3),
+                            mode='lines+markers',
+                            hovertemplate="Mês: %{x}<br>Receitas: R$ %{y:,.2f}<extra></extra>"
+                        ))
+                        fig_linhas.add_trace(go.Scatter(
+                            x=df_evolucao['Mes_Fatura'], 
+                            y=df_evolucao['Total_Despesas'],
+                            name='🔴 Despesas (Gastos)',
+                            line=dict(color='#6366f1', width=3),
+                            mode='lines+markers',
+                            hovertemplate="Mês: %{x}<br>Despesas: R$ %{y:,.2f}<extra></extra>"
+                        ))
+                        
+                        fig_linhas.update_layout(
+                            margin=dict(t=20, b=20, l=10, r=10),
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                            height=300
+                        )
+                        st.plotly_chart(fig_linhas, use_container_width=True)
+                    
+                    st.write("---")
+                    
+                    # MATRIZ DE CALOR (HEATMAP DE CATEGORIAS)
+                    st.markdown("**Matriz de Calor de Gastos por Categoria (Últimos 6 meses)**")
+                    df_despesas_total = df_projetado[df_projetado['Tipo'] != 'Entrada']
+                    if not df_despesas_total.empty:
+                        # Pivotando os dados para a estrutura de Heatmap
+                        df_heatmap_data = df_despesas_total.groupby(['Categoria', 'Mes_Fatura'])['Valor_Parcela'].sum().unstack(fill_value=0.0)
+                        
+                        # Limita aos últimos 6 meses de faturamento para melhor layout em tela
+                        meses_recentes = sorted(df_despesas_total['Mes_Fatura'].unique())[-6:]
+                        df_heatmap_data = df_heatmap_data[meses_recentes]
+                        
+                        fig_heatmap = go.Figure(data=go.Heatmap(
+                            z=df_heatmap_data.values,
+                            x=df_heatmap_data.columns,
+                            y=df_heatmap_data.index,
+                            colorscale='Emrld',
+                            hovertemplate="Mês: %{x}<br>Categoria: %{y}<br>Valor: R$ %{z:,.2f}<extra></extra>"
+                        ))
+                        fig_heatmap.update_layout(
+                            xaxis_title="Meses de Fatura",
+                            yaxis_title="Categorias",
+                            margin=dict(t=20, b=20, l=10, r=10),
+                            height=350
+                        )
+                        st.plotly_chart(fig_heatmap, use_container_width=True)
+                    
+                    st.write("---")
+                    
+                    st.markdown("**Extrato Detalhado do Mês de Competência**")
+                    # Remove duplicidade de linhas que foram explodidas pelo multiselect para mostrar uma tabela organizada e limpa
+                    df_mes_tabela = df_mes.drop_duplicates(subset=['Data', 'Descricao', 'Valor', 'Categoria', 'Forma_Pagamento', 'Parcela_Atual'])
+                    
+                    df_mes_exibe = df_mes_tabela[['Data_Exibicao', 'Descricao', 'Valor', 'Parcela_Atual', 'Categoria', 'Responsavel', 'Forma_Pagamento', 'Tipo']].copy()
+                    df_mes_exibe.rename(columns={'Data_Exibicao': 'Data', 'Valor': 'Valor Total (R$)'}, inplace=True)
+                    
+                    def formatar_valor_tabela(val):
+                        f = tratar_entrada_numerica(val)
+                        return formatar_brl(f)
+                    df_mes_exibe['Valor Total (R$)'] = df_mes_exibe['Valor Total (R$)'].apply(formatar_valor_tabela)
+                    
+                    st.dataframe(df_mes_exibe, use_container_width=True)
+                else:
+                    st.info("Nenhum mês disponível para análise.")
 
-    if df_orc.empty:
-        st.info("Nenhum orçamento definido ainda.")
-    else:
-        for _, row in df_orc.iterrows():
-            cat, teto = row["Categoria"], row["Teto_Mensal"]
-            if teto <= 0:
-                continue
-            gasto = float(gasto_por_cat.get(cat, 0))
-            pct = min(gasto / teto, 1.0)
-            if gasto >= teto:        emoji = "⛔"
-            elif pct >= 0.9:         emoji = "🔴"
-            elif pct >= 0.7:         emoji = "🟡"
-            else:                    emoji = "🟢"
-            st.write(f"{emoji} **{cat}** — {brl(gasto)} de {brl(teto)} ({pct*100:.0f}%)")
-            st.progress(pct)
+            # TAB 3: CONTROLE DE PARCELAS ACUMULADAS E ASSINATURAS
+            with tabs[2]:
+                st.subheader("Dívidas Parceladas e Controle de Assinaturas")
+                
+                hoje_str = hoje_brasil.strftime("%Y-%m")
+                
+                df_futuro = df_projetado[(df_projetado['Mes_Fatura'] > hoje_str) & (df_projetado['Parcelado'] == 'Sim')]
+                saldo_devedor_futuro = df_futuro['Valor_Parcela'].sum()
+                
+                st.warning(f"🏦 **Saldo Devedor Total Acumulado (Faturas Seguintes):** {formatar_brl(saldo_devedor_futuro)}")
+                
+                col_esquerda, col_direita = st.columns(2)
+                
+                with col_esquerda:
+                    st.markdown("### 💳 Cronograma de Parcelamentos")
+                    if not df_futuro.empty:
+                        cronograma = df_futuro.groupby(['Mes_Fatura', 'Forma_Pagamento'])['Valor_Parcela'].sum().unstack().fillna(0)
+                        
+                        for col in cronograma.columns:
+                            cronograma[col] = cronograma[col].apply(formatar_brl)
+                        
+                        st.dataframe(cronograma, use_container_width=True)
+                        
+                        st.markdown("**Detalhe das Parcelas Futuras**")
+                        df_futuro_exibe = df_futuro[['Mes_Fatura', 'Descricao', 'Valor_Parcela', 'Parcela_Atual', 'Forma_Pagamento']].copy()
+                        df_futuro_exibe['Valor_Parcela'] = df_futuro_exibe['Valor_Parcela'].apply(formatar_brl)
+                        st.dataframe(df_futuro_exibe, use_container_width=True)
+                    else:
+                        st.info("Muito bom! Você não tem compras parceladas para os próximos meses.")
+                        
+                with col_direita:
+                    st.markdown("### 🔄 Assinaturas e Recorrências Ativas")
+                    df_assinaturas = df_projetado[df_projetado['Tipo'] == 'Assinatura'].drop_duplicates(subset=['Descricao'])
+                    if not df_assinaturas.empty:
+                        tot_mensal_ass = df_assinaturas['Valor_Parcela'].sum()
+                        st.success(f"📋 **Custo Mensal de Assinaturas:** {formatar_brl(tot_mensal_ass)}")
+                        
+                        df_ass_exibe = df_assinaturas[['Descricao', 'Valor_Parcela', 'Categoria', 'Forma_Pagamento']].copy()
+                        df_ass_exibe['Valor_Parcela'] = df_ass_exibe['Valor_Parcela'].apply(formatar_brl)
+                        st.dataframe(df_ass_exibe, use_container_width=True)
+                    else:
+                        st.info("Nenhuma assinatura cadastrada.")
 
-
-# ============================================================================
-# TAB 6 — AJUSTAR
-# ============================================================================
-with tab_aj:
-    st.subheader("✏️ Ajustar lançamentos da planilha")
-    st.caption("Edite valores diretamente. Use o botão para salvar; o cache é renovado automaticamente.")
-
-    df_edit = df_bruto.copy()
-    df_edit.insert(0, "Linha_Planilha", range(2, len(df_edit) + 2))
-
-    edited = st.data_editor(
-        df_edit, use_container_width=True, hide_index=True,
-        num_rows="fixed", key="editor_lanc",
-        disabled=["Linha_Planilha"],
-    )
-
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("💾 Salvar alterações", use_container_width=True):
-            try:
-                colunas = [c for c in edited.columns if c != "Linha_Planilha"]
-                valores = edited[colunas].astype(str).values.tolist()
-                # Reescreve a partir da linha 2
-                inicio = "A2"
-                sheet.update(inicio, valores, value_input_option="USER_ENTERED")
-                limpar_cache_dados()
-                st.success("✅ Planilha atualizada.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erro ao salvar: {e}")
-    with c2:
-        linha_del = st.number_input("Excluir linha nº (2 = primeira)",
-                                    min_value=2, max_value=len(df_edit) + 1, value=2)
-        if st.button("🗑️ Excluir linha", use_container_width=True):
-            try:
-                sheet.delete_rows(int(linha_del))
-                limpar_cache_dados()
-                st.success(f"Linha {linha_del} excluída.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erro: {e}")
+            # TAB 4: EDITAR E CORRIGIR LANÇAMENTOS
+            with tabs[3]:
+                st.subheader("Corrigir ou Apagar Lançamentos")
+                st.markdown("Selecione um lançamento da lista para editar os valores ou apagá-los de forma instantânea.")
+                
+                df_editor = dados_brutos.copy()
+                
+                if not df_editor.empty:
+                    df_editor = df_editor.iloc[::-1].reset_index(drop=True)
+                    
+                    def gerar_linha_opcao(row):
+                        data_formatada = formatar_data_br(row.get('Data', ''))
+                        v_float = tratar_entrada_numerica(row.get('Valor', 0.0))
+                        v_brl = formatar_brl(v_float)
+                        return f"{data_formatada} | {row.get('Descricao', 'Sem Descrição')} | {v_brl} ({row.get('Forma_Pagamento', 'Pix')})"
+                    
+                    df_editor['Identificacao_Opcao'] = df_editor.apply(gerar_linha_opcao, axis=1)
+                    
+                    selecao = st.selectbox("Selecione qual item quer alterar ou excluir:", df_editor['Identificacao_Opcao'])
+                    
+                    if selecao:
+                        item_selecionado = df_editor[df_editor['Identificacao_Opcao'] == selecao].iloc[0]
+                        
+                        idx_dataframe = df_editor[df_editor['Identificacao_Opcao'] == selecao].index[0]
+                        linha_planilha_real = (len(dados_brutos) - idx_dataframe) + 1
+                        
+                        try:
+                            data_item = datetime.strptime(str(item_selecionado['Data']).split()[0], "%Y-%m-%d").date()
+                        except Exception:
+                            try:
+                                data_item = datetime.strptime(str(item_selecionado['Data']).split()[0], "%d/%m/%Y").date()
+                            except Exception:
+                                data_item = hoje_brasil
+                        
+                        valor_antigo_float = tratar_entrada_numerica(item_selecionado['Valor'])
+                        valor_antigo_br = f"{valor_antigo_float:.2f}".replace(".", ",")
+                        
+                        resp_item_raw = str(item_selecionado.get('Responsavel', 'Jonathan'))
+                        resp_item_lista = [r.strip() for r in resp_item_raw.split(",") if r.strip()]
+                        
+                        st.markdown(f"📍 **Editando Linha {linha_planilha_real} da planilha:**")
+                        
+                        with st.form("form_edicao"):
+                            e_col1, e_col2 = st.columns(2)
+                            with e_col1:
+                                e_data = st.date_input("Nova Data", data_item, format="DD/MM/YYYY")
+                                e_desc = st.text_input("Nova Descrição", value=item_selecionado['Descricao'])
+                                e_valor_texto = st.text_input("Corrigir Valor (R$)", value=valor_antigo_br)
+                                e_tipo = st.selectbox(
+                                    "Novo Tipo", 
+                                    ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"],
+                                    index=["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"].index(item_selecionado['Tipo'])
+                                )
+                            with e_col2:
+                                if e_tipo == "Gasto Fixo":
+                                    e_lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
+                                elif e_tipo == "Gasto Variável":
+                                    e_lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
+                                elif e_tipo == "Assinatura":
+                                    e_lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
+                                else: 
+                                    e_lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
+                                
+                                idx_cat_edicao = e_lista_cats.index(item_selecionado['Categoria']) if item_selecionado['Categoria'] in e_lista_cats else 0
+                                e_cat = st.selectbox("Nova Categoria", e_lista_cats, index=idx_cat_edicao)
+                                
+                                e_resp = st.multiselect(
+                                    "Novos Responsáveis", 
+                                    ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"],
+                                    default=resp_item_lista
+                                )
+                                
+                                e_forma = st.selectbox(
+                                    "Nova Forma de Pagamento", 
+                                    ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"],
+                                    index=["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"].index(item_selecionado['Forma_Pagamento'])
+                                )
+                                
+                                e_parcelado = item_selecionado.get('Parcelado', 'Não')
+                                e_tot_parc = int(item_selecionado.get('Parcelas_Totais', 1))
+                                
+                            btn_atualizar = st.form_submit_button("💾 Salvar Alterações")
+                            
+                            if btn_atualizar:
+                                val_novo_float = tratar_entrada_numerica(e_valor_texto)
+                                
+                                if not e_resp:
+                                    st.error("Selecione pelo menos um responsável.")
+                                elif e_desc and val_novo_float > 0:
+                                    resp_ed_salvar = ", ".join(e_resp)
+                                    valor_ed_gravar = f"{val_novo_float:.2f}".replace(".", ",")
+                                    
+                                    linha_atualizada = [
+                                        str(e_data), e_desc, valor_ed_gravar, e_cat, e_tipo, 
+                                        resp_ed_salvar, e_forma, e_parcelado, e_tot_parc
+                                    ]
+                                    
+                                    try:
+                                        sheet_conn.update(f"A{linha_planilha_real}:I{linha_planilha_real}", [linha_atualizada], value_input_option='USER_ENTERED')
+                                        st.success("Lançamento atualizado com sucesso! Reiniciando visualização...")
+                                        st.rerun()
+                                    except Exception as err:
+                                        st.error(f"Erro ao salvar modificação: {err}")
+                        
+                        # EXCLUSÃO
+                        st.markdown("---")
+                        st.markdown("### ⚠️ Zona de Perigo")
+                        confirmar_exclusao = st.checkbox("Eu quero excluir permanentemente este lançamento da minha planilha.")
+                        btn_excluir = st.button("❌ APAGAR DEFINITIVAMENTE", disabled=not confirmar_exclusao, type="secondary")
+                        
+                        if btn_excluir and confirmar_exclusao:
+                            try:
+                                sheet_conn.delete_rows(linha_planilha_real)
+                                st.success("Lançamento apagado da planilha!")
+                                st.rerun()
+                            except Exception as err:
+                                st.error(f"Erro ao apagar linha: {err}")
+                else:
+                    st.info("A planilha está vazia.")
+else:
+    st.info("Aguardando os primeiros dados da planilha para renderizar os gráficos.")
