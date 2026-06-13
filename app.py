@@ -261,35 +261,33 @@ with tabs[0]:
     if sheet_conn is None:
         st.info("⚠️ **O formulário de envio está temporariamente desativado devido a problemas de conexão.**")
     else:
-        # 🟢 Tipo de Lançamento fora do form para garantir interatividade imediata das categorias
+        # 🟢 Tipo de Lançamento simplificado mantendo apenas "Gastos Fixos" e "Assinaturas"
         tipo_exibido = st.selectbox(
             "Tipo de Lançamento", 
             [
                 "Gasto Variável", 
-                "Gasto Fixo (Valor Variável)", 
-                "Gasto Fixo / Assinatura (Valor Fixo)", 
+                "Gasto Fixo", 
+                "Assinatura", 
                 "Entrada"
             ]
         )
         
-        # Define a lista de categorias e o tipo que será de fato gravado na planilha para compatibilidade
-        if tipo_exibido == "Gasto Fixo (Valor Variável)":
+        # Define a lista de categorias e o tipo correspondente
+        if tipo_exibido == "Gasto Fixo":
             tipo_salvar = "Gasto Fixo"
-            lista_cats = ["Luz", "Água", "Internet (Variável)", "Telefone (Variável)", "Condomínio (Variável)", "Outros Fixos Variáveis"]
-        elif tipo_exibido == "Gasto Fixo / Assinatura (Valor Fixo)":
-            # Salvaremos como "Gasto Fixo / Assinatura" na planilha para que a projeção de 12 meses seja ativada
-            tipo_salvar = "Gasto Fixo / Assinatura"
+            lista_cats = ["Luz", "Água", "Plano de Saúde", "Internet (Variável)", "Telefone (Variável)", "Condomínio (Variável)", "Outros Fixos"]
+        elif tipo_exibido == "Assinatura":
+            tipo_salvar = "Assinatura"
             lista_cats = [
                 "Internet", 
                 "Telefone/Celular", 
                 "Aluguel", 
                 "Condomínio", 
-                "Plano de Saúde", 
                 "Academia", 
                 "Streaming (Netflix/Spotify/Prime)", 
                 "Seguro (Carro/Casa)", 
                 "Mensalidade Escolar/Curso", 
-                "Outros Fixos Recorrentes"
+                "Outras Assinaturas"
             ]
         elif tipo_exibido == "Gasto Variável":
             tipo_salvar = "Gasto Variável"
@@ -751,12 +749,13 @@ if sheet_conn is not None:
                         resp_item_raw = str(item_selecionado.get('Responsavel', 'Jonathan'))
                         resp_item_lista = [r.strip() for r in resp_item_raw.split(",") if r.strip()]
                         
-                        # Mapeamento do tipo da planilha para o dropdown interativo
+                        # Mapeamento limpo e simplificado para as edições
                         tipo_map = {
                             "Gasto Variável": "Gasto Variável",
-                            "Gasto Fixo": "Gasto Fixo (Valor Variável)",
-                            "Assinatura": "Gasto Fixo / Assinatura (Valor Fixo)",
-                            "Gasto Fixo / Assinatura": "Gasto Fixo / Assinatura (Valor Fixo)",
+                            "Gasto Fixo": "Gasto Fixo",
+                            "Gasto Fixo (Valor Variável)": "Gasto Fixo",
+                            "Assinatura": "Assinatura",
+                            "Gasto Fixo / Assinatura": "Assinatura",
                             "Entrada": "Entrada"
                         }
                         stored_tipo = item_selecionado.get('Tipo', 'Gasto Variável')
@@ -773,31 +772,30 @@ if sheet_conn is not None:
                                 
                                 e_tipo_options = [
                                     "Gasto Variável", 
-                                    "Gasto Fixo (Valor Variável)", 
-                                    "Gasto Fixo / Assinatura (Valor Fixo)", 
+                                    "Gasto Fixo", 
+                                    "Assinatura", 
                                     "Entrada"
                                 ]
                                 idx_tipo_edicao = e_tipo_options.index(mapped_tipo) if mapped_tipo in e_tipo_options else 0
                                 e_tipo = st.selectbox("Novo Tipo", e_tipo_options, index=idx_tipo_edicao)
                                 
                             with e_col2:
-                                # Reatividade interna da categoria de edição baseada no tipo selecionado
-                                if e_tipo == "Gasto Fixo (Valor Variável)":
+                                # Reatividade simplificada no formulário de edição
+                                if e_tipo == "Gasto Fixo":
                                     tipo_ed_salvar = "Gasto Fixo"
-                                    e_lista_cats = ["Luz", "Água", "Internet (Variável)", "Telefone (Variável)", "Condomínio (Variável)", "Outros Fixos Variáveis"]
-                                elif e_tipo == "Gasto Fixo / Assinatura (Valor Fixo)":
-                                    tipo_ed_salvar = "Gasto Fixo / Assinatura"
+                                    e_lista_cats = ["Luz", "Água", "Plano de Saúde", "Internet (Variável)", "Telefone (Variável)", "Condomínio (Variável)", "Outros Fixos"]
+                                elif e_tipo == "Assinatura":
+                                    tipo_ed_salvar = "Assinatura"
                                     e_lista_cats = [
                                         "Internet", 
                                         "Telefone/Celular", 
                                         "Aluguel", 
                                         "Condomínio", 
-                                        "Plano de Saúde", 
                                         "Academia", 
                                         "Streaming (Netflix/Spotify/Prime)", 
                                         "Seguro (Carro/Casa)", 
                                         "Mensalidade Escolar/Curso", 
-                                        "Outros Fixos Recorrentes"
+                                        "Outras Assinaturas"
                                     ]
                                 elif e_tipo == "Gasto Variável":
                                     tipo_ed_salvar = "Gasto Variável"
