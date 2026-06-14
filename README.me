@@ -1,0 +1,118 @@
+🛡️ Manual de Segurança: Estrutura do Google Sheets & Integração API
+
+Este documento serve como o Guia de Segurança do Banco de Dados para o aplicativo Controle Financeiro Familiar. A planilha hospedada no Google Sheets funciona como o banco de dados relacional do sistema. Para evitar que o aplicativo pare de funcionar (erros de execução ou gráficos quebrados), a estrutura descrita abaixo nunca deve ser alterada de forma física diretamente na planilha sem a devida atualização do código Python (app.py).
+
+📋 1. Configurações Globais da Planilha
+
+Nome do Arquivo no Google Drive: Livre (pode ser qualquer nome de sua preferência).
+
+ID do Link da Planilha: 1JyVUY1pKQs90jtPPBvEHDLnGxBw3wdooEFWSq-1e5D4 (Definido fixamente no código).
+
+Nome exato da Aba (Worksheet): Lancamentos (Sensível a maiúsculas/minúsculas e sem acento).
+
+E-mail de Serviço da API (Google Service Account): Encontrado dentro das suas credenciais secretas do Streamlit.
+
+Regra de Ouro: A planilha deve estar compartilhada com este e-mail do Google com permissão de Editor, caso contrário, o aplicativo não conseguirá ler nem salvar novos registros.
+
+🗂️ 2. Estrutura de Colunas Obrigatória (Linha 1)
+
+A primeira linha da aba Lancamentos deve conter exatamente as seguintes colunas, na mesma ordem e com a exata grafia (maiúsculas, minúsculas e sublinhados):
+
+| Coluna | Nome do Cabeçalho | Tipo de Dado | Exemplo de Preenchimento | Descrição / Regras de Negócio |
+| A | Data | Texto (Data ISO) | 2026-06-08 | Data da transação. Salva automaticamente pelo formulário no formato AAAA-MM-DD. |
+| B | Descricao | Texto | Mercado Muffato | Detalhe textual do gasto ou receita. |
+| C | Valor | Texto (Decimal BR) | 150,50 | Valor monetário. Salvo com vírgula decimal , para garantir digitação suave no celular. |
+| D | Categoria | Texto | Supermercado | Deve pertencer às categorias válidas do tipo (ver seção 3). |
+| E | Tipo | Texto | Gasto Variável | Define o fluxo. Valores aceitos: Gasto Variável, Gasto Fixo, Assinatura, Entrada. |
+| F | Responsavel | Texto | Jonathan, Bruna | Quem fez ou se beneficia do gasto. Itens separados por vírgula para divisão automática em memória. |
+| G | Forma_Pagamento | Texto | Cartão Nu | Define a regra de faturamento se for cartão. Valores aceitos: Cartão Nu, Cartão BB, Pix, Dinheiro, Boleto, Débito em conta. |
+| H | Parcelado | Texto | Sim | Status de parcelas. Aceita apenas Sim ou Não. |
+| I | Parcelas_Totais | Inteiro | 3 | Quantidade total de parcelas (de 1 a 48). Se não parcelado, deve ser 1. |
+
+🏷️ 3. Dicionário de Categorias Homologadas
+
+Para que os gráficos do Dashboard e de Evolução Mensal funcionem sem poluição visual, o formulário do aplicativo restringe as entradas às seguintes categorias:
+
+🟢 Tipo: Entrada
+
+Salário
+
+Rendimento
+
+Pix Recebido
+
+Outras Entradas
+
+🔒 Tipo: Gasto Fixo
+
+Luz
+
+Água
+
+Internet
+
+Telefone
+
+Condomínio
+
+Aluguel
+
+Plano de Saúde
+
+Outros Fixos
+
+🔄 Tipo: Assinatura
+
+Streaming (Netflix/Spotify)
+
+Academia
+
+Clube de Assinatura
+
+Software/App
+
+Outras Assinaturas
+
+💸 Tipo: Gasto Variável
+
+Refeição
+
+Supermercado
+
+Abastecimento
+
+Shopping
+
+Farmácia
+
+Lazer
+
+Viagem
+
+Presentes
+
+Outros Variáveis
+
+🚨 4. Protocolo contra Quebras (O que NÃO fazer)
+
+NÃO renomeie nenhum cabeçalho da primeira linha da planilha física.
+
+NÃO altere a ordem das colunas (Ex: mover Valor para a coluna A). O Python faz a escrita sequencial por índice (A até I). Se mudar a ordem, os dados serão gravados nos campos errados.
+
+NÃO delete linhas vazias intermediárias de forma agressiva. Se precisar limpar a planilha, prefira usar a aba "✏️ Ajustar Lançamentos" diretamente de dentro do aplicativo para garantir a reindexação adequada da API.
+
+NÃO insira fórmulas manuais nas colunas de Data ou Valor na planilha do Google Sheets, pois o Python sobrescreve os valores como texto estruturado de forma limpa.
+
+🛠️ 5. Resolução de Problemas (Troubleshooting)
+
+O App exibe: "Aba 'Lancamentos' não encontrada!"
+
+Motivo: Alguém renomeou a guia inferior da planilha física (ex: mudou para "Lançamentos" com cedilha e til, ou "Dados").
+
+Solução: Dê dois cliques na guia da planilha no Google Sheets e mude de volta para Lancamentos.
+
+O App exibe: "Planilha não compartilhada com a API..."
+
+Motivo: O acesso de compartilhamento foi removido.
+
+Solução: Copie o e-mail de serviço que aparece na mensagem de erro vermelha do Streamlit, vá na planilha, clique em Compartilhar no canto superior direito, cole o e-mail e salve-o como Editor.
