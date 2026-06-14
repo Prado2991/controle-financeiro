@@ -115,34 +115,15 @@ st.markdown("""
         opacity: 0.8;
     }
 
-    /* Cards de widget para gráficos (Estilo SaaS Moderno) */
-    .dashboard-card {
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 24px;
-        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05);
-        margin-bottom: 20px;
-    }
-
-    .dashboard-card-title {
-        font-size: 16px;
-        font-weight: 700;
-        color: #1e1b4b;
-        margin-bottom: 16px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-
-    /* Título com gradiente elegante */
+    /* Título com estilo premium e sólido (evita bugs de destaque/marca-texto) */
     .main-title {
-        background: linear-gradient(to right, #312e81, #047857);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #1e1b4b; /* Azul escuro premium */
         font-size: 32px;
         font-weight: 800;
         margin-bottom: 5px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
