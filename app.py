@@ -115,7 +115,7 @@ st.markdown("""
         opacity: 0.8;
     }
 
-    /* Título com estilo premium e sólido (evita bugs de destaque/marca-texto) */
+    /* Título com estilo premium e sólido */
     .main-title {
         color: #1e1b4b; /* Azul escuro premium */
         font-size: 32px;
@@ -242,51 +242,28 @@ with tabs[0]:
     if sheet_conn is None:
         st.info("⚠️ **O formulário de envio está temporariamente desativado devido a problemas de conexão.**")
     else:
-        # 🟢 Tipo de Lançamento simplificado mantendo apenas "Gastos Fixos" e "Assinaturas"
-        tipo_exibido = st.selectbox(
-            "Tipo de Lançamento", 
-            [
-                "Gasto Variável", 
-                "Gasto Fixo", 
-                "Assinatura", 
-                "Entrada"
-            ]
-        )
+        # "Tipo de Lançamento" fora do formulário para garantir atualização instantânea de categorias
+        tipo = st.selectbox("Tipo de Lançamento", ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"])
         
-        # Define a lista de categorias e o tipo correspondente
-        if tipo_exibido == "Gasto Fixo":
-            tipo_salvar = "Gasto Fixo"
-            lista_cats = ["Luz", "Água", "Plano de Saúde", "Internet (Variável)", "Telefone (Variável)", "Condomínio (Variável)", "Outros Fixos"]
-        elif tipo_exibido == "Assinatura":
-            tipo_salvar = "Assinatura"
-            lista_cats = [
-                "Internet", 
-                "Telefone/Celular", 
-                "Aluguel", 
-                "Condomínio", 
-                "Academia", 
-                "Streaming (Netflix/Spotify/Prime)", 
-                "Seguro (Carro/Casa)", 
-                "Mensalidade Escolar/Curso", 
-                "Outras Assinaturas"
-            ]
-        elif tipo_exibido == "Gasto Variável":
-            tipo_salvar = "Gasto Variável"
+        # Define a lista de categorias baseado no Tipo selecionado
+        if tipo == "Gasto Fixo":
+            lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
+        elif tipo == "Gasto Variável":
             lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
+        elif tipo == "Assinatura":
+            lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
         else: 
-            tipo_salvar = "Entrada"
             lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
         
+        # Formulário limpo e otimizado
         with st.form("form_lancamento", clear_on_submit=True):
             col1, col2 = st.columns([1, 1])
             with col1:
-                # Calendário iniciando na data real do fuso de SP
                 data = st.date_input("Data do Lançamento", hoje_brasil, format="DD/MM/YYYY")
-                descricao = st.text_input("Descrição", placeholder="Ex: Sorveteria Sávio, Plano Claro, Conta Copel")
+                descricao = st.text_input("Descrição", placeholder="Ex: Sorveteria Sávio, Roupas na Shein, Mercado Muffato")
                 valor_texto = st.text_input("Valor (R$)", value="0,00", help="Use vírgula para centavos. Exemplo: 8,99 ou 150,50")
             
             with col2:
-                # Seleção de Categoria dinâmica associada ao Tipo escolhido
                 categoria = st.selectbox("Categoria", lista_cats)
                 
                 responsavel = st.multiselect(
@@ -297,17 +274,22 @@ with tabs[0]:
                 
                 forma_pagto = st.selectbox("Forma de Pagamento", ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"])
                 
-                pode_parcelar = tipo_salvar in ["Gasto Variável", "Gasto Fixo"]
+                # 🟢 SOLUÇÃO ELIMINA-BUGS: Sempre exibe o número de parcelas para despesas sem depender de clicks lentos
+                pode_parcelar = tipo in ["Gasto Variável", "Gasto Fixo"]
                 if pode_parcelar:
-                    parcelado = st.radio("Compra Parcelada?", ["Não", "Sim"], horizontal=True)
-                    if parcelado == "Sim":
-                        num_parcelas = st.number_input("Quantidade de Parcelas", min_value=2, max_value=48, value=2, step=1)
-                    else:
-                        num_parcelas = 1
+                    num_parcelas = st.number_input(
+                        "Quantidade de Parcelas (Mantenha 1 se for à vista)", 
+                        min_value=1, 
+                        max_value=48, 
+                        value=1, 
+                        step=1,
+                        help="Se for uma compra parcelada, informe a quantidade total de parcelas. Se for à vista, deixe em 1."
+                    )
+                    parcelado = "Sim" if num_parcelas > 1 else "Não"
                 else:
                     parcelado = "Não"
                     num_parcelas = 1
-            
+                    
             botao_salvar = st.form_submit_button("🚀 Gravar na Planilha")
             
             if botao_salvar:
@@ -320,7 +302,7 @@ with tabs[0]:
                     valor_gravar_sheets = f"{val_float:.2f}".replace(".", ",")
                     
                     novo_registro = [
-                        str(data), descricao, valor_gravar_sheets, categoria, tipo_salvar, 
+                        str(data), descricao, valor_gravar_sheets, categoria, tipo, 
                         resp_salvar, forma_pagto, parcelado, int(num_parcelas)
                     ]
                     try:
@@ -341,7 +323,7 @@ if sheet_conn is not None:
         st.warning("Aguardando lançamentos na aba 'Lancamentos' para carregar os gráficos.")
 
     if not dados_brutos.empty:
-        # Processar projeções de parcelas futuras e assinaturas automáticas em memória
+        # Processar projeções de parcelas futuras e assinaturas em memória
         lista_projetada = []
         for index, row in dados_brutos.iterrows():
             try:
@@ -361,7 +343,7 @@ if sheet_conn is not None:
                 valor_total = float(valor_raw)
                 
             tipo_lanc = row.get('Tipo', 'Gasto Variável')
-            total_parc = int(row['Parcelas_Totais']) if row.get('Parcelas_Totais') else 1
+            total_parc = int(row['Parcelas_Totais']) if row.get('Parcelas_Totais') and pd.notna(row.get('Parcelas_Totais')) else 1
             
             # Divisão proporcional de responsáveis
             resp_raw = str(row.get('Responsavel', 'Jonathan'))
@@ -371,8 +353,8 @@ if sheet_conn is not None:
             
             divisao_pessoas = len(responsaveis_list)
             
-            # Projeção de Assinaturas e Gastos Fixos Recorrentes para os próximos 12 meses
-            if tipo_lanc in ["Assinatura", "Gasto Fixo / Assinatura"]:
+            # Projeção de assinaturas para os próximos 12 meses
+            if tipo_lanc == "Assinatura":
                 for m in range(12):
                     dt_recorrente = dt_compra + relativedelta(months=m)
                     mes_competencia = calcular_mes_competencia(dt_recorrente, row.get('Forma_Pagamento', 'Dinheiro'))
@@ -385,8 +367,9 @@ if sheet_conn is not None:
                         item_proj['Parcela_Atual'] = "Recorrente"
                         lista_projetada.append(item_proj)
             else:
-                # Compras normais e parceladas (Gasto Variável, Gasto Fixo e Entradas)
-                val_parcela = valor_total / total_parc if row.get('Parcelado') == 'Sim' else valor_total
+                # Compras normais e parceladas
+                is_parcelado = str(row.get('Parcelado')).strip() == 'Sim'
+                val_parcela = valor_total / total_parc if is_parcelado and total_parc > 0 else valor_total
                 for p in range(total_parc):
                     dt_parcela = dt_compra + relativedelta(months=p)
                     mes_competencia = calcular_mes_competencia(dt_parcela, row.get('Forma_Pagamento', 'Dinheiro'))
@@ -396,7 +379,7 @@ if sheet_conn is not None:
                         item_proj['Mes_Fatura'] = mes_competencia
                         item_proj['Valor_Parcela'] = val_parcela / divisao_pessoas
                         item_proj['Responsavel_Dividido'] = resp
-                        item_proj['Parcela_Atual'] = f"{p+1}/{total_parc}" if row.get('Parcelado') == 'Sim' else "1/1"
+                        item_proj['Parcela_Atual'] = f"{p+1}/{total_parc}" if is_parcelado else "1/1"
                         lista_projetada.append(item_proj)
                 
         if lista_projetada:
@@ -419,7 +402,6 @@ if sheet_conn is not None:
                 
                 meses_disponiveis = sorted(df_projetado['Mes_Fatura'].unique())
                 if meses_disponiveis:
-                    # Encontra o mês atual em SP para selecionar dinamicamente como padrão
                     mes_atual_padrao = hoje_brasil.strftime("%Y-%m")
                     idx_padrao = meses_disponiveis.index(mes_atual_padrao) if mes_atual_padrao in meses_disponiveis else len(meses_disponiveis)-1
                     
@@ -427,17 +409,16 @@ if sheet_conn is not None:
                     
                     df_mes = df_projetado[df_projetado['Mes_Fatura'] == mes_selecionado]
                     
-                    # KPIs Principais do Mês Selecionado
+                    # KPIs Principais
                     tot_entradas = df_mes[df_mes['Tipo'] == 'Entrada']['Valor_Parcela'].sum()
                     tot_saidas = df_mes[df_mes['Tipo'] != 'Entrada']['Valor_Parcela'].sum()
                     
-                    # Faturas Cartões (A nova regra foi aplicada aqui!)
                     fatura_nu = df_mes[df_mes['Forma_Pagamento'] == 'Cartão Nu']['Valor_Parcela'].sum()
                     fatura_bb = df_mes[df_mes['Forma_Pagamento'] == 'Cartão BB']['Valor_Parcela'].sum()
                     
                     saldo_final = tot_entradas - tot_saidas
                     
-                    # BLOCOS DE KPI MODERNOS (GRADIENTE, SOMBRA, HOVER)
+                    # KPIs VISUAIS
                     kpi_c1, kpi_c2, kpi_c3, kpi_c4 = st.columns(4)
                     
                     with kpi_c1:
@@ -478,18 +459,14 @@ if sheet_conn is not None:
                     
                     st.write("---")
                     
-                    st.markdown("### 📊 Análise Setorial das Despesas")
+                    # SEÇÃO DE GRÁFICOS SEPARADOS (ATENDENDO SOLICITAÇÃO DE JONATHAN)
+                    st.markdown("### 📊 Análise de Despesas do Mês")
                     
                     g_col1, g_col2 = st.columns(2)
                     
-                    # GRÁFICO 1: GASTOS VARIÁVEIS (Foco de Controle Ativo de Despesas)
+                    # 1. GRÁFICO EXCLUSIVO: GASTOS VARIÁVEIS (Foco de Controle Ativo de Despesas)
                     with g_col1:
-                        st.markdown("""
-                        <div class="dashboard-card">
-                            <div class="dashboard-card-title">💸 Gastos Variáveis (Foco de Controle Diário)</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        # Filtra apenas os Gastos Variáveis do mês selecionado
+                        st.markdown("**💸 Gastos Variáveis (Controle Ativo e Flexível)**")
                         df_gasto_var = df_mes[df_mes['Tipo'] == 'Gasto Variável'].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
                         
                         if not df_gasto_var.empty:
@@ -499,11 +476,11 @@ if sheet_conn is not None:
                                 values='Valor_Parcela', 
                                 names='Categoria', 
                                 hole=0.5,
-                                color_discrete_sequence=['#10b981', '#059669', '#34d399', '#6ee7b7', '#a7f3d0', '#047857', '#065f46', '#064e3b'] # Tons verdes esmeralda
+                                color_discrete_sequence=['#10b981', '#059669', '#34d399', '#6ee7b7', '#a7f3d0', '#047857', '#065f46', '#064e3b']
                             )
                             fig_donut_var.update_traces(
                                 textinfo='percent+label',
-                                hovertemplate="<b>%{label}</b><br>Gasto: R$ %{value:,.2f}<br>Fração: %{percent}<extra></extra>"
+                                hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:,.2f}<br>Representa: %{percent}<extra></extra>"
                             )
                             fig_donut_var.add_annotation(
                                 text=f"Variáveis<br><b>R$ {total_g_var:,.2f}</b>",
@@ -518,17 +495,12 @@ if sheet_conn is not None:
                             )
                             st.plotly_chart(fig_donut_var, use_container_width=True)
                         else:
-                            st.info("Nenhum Gasto Variável registrado neste mês de análise.")
+                            st.info("Nenhum Gasto Variável registrado neste período.")
                             
-                    # GRÁFICO 2: GASTOS FIXOS & RECORRENTES (Comprometido estrutural)
+                    # 2. GRÁFICO EXCLUSIVO: GASTOS FIXOS & ASSINATURAS (Estrutura e Custos Fixados)
                     with g_col2:
-                        st.markdown("""
-                        <div class="dashboard-card">
-                            <div class="dashboard-card-title">🔒 Gastos Fixos & Assinaturas Recorrentes</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        # Filtra Gastos Fixos normais, Assinaturas tradicionais e o novo tipo unificado
-                        df_gasto_fix = df_mes[df_mes['Tipo'].isin(['Gasto Fixo', 'Assinatura', 'Gasto Fixo / Assus', 'Gasto Fixo / Assinatura'])].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
+                        st.markdown("**🔒 Gastos Fixos & Assinaturas (Custo Estrutural)**")
+                        df_gasto_fix = df_mes[df_mes['Tipo'].isin(['Gasto Fixo', 'Assinatura'])].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
                         
                         if not df_gasto_fix.empty:
                             total_g_fix = df_gasto_fix['Valor_Parcela'].sum()
@@ -537,11 +509,11 @@ if sheet_conn is not None:
                                 values='Valor_Parcela', 
                                 names='Categoria', 
                                 hole=0.5,
-                                color_discrete_sequence=['#312e81', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe'] # Tons azuis/indigo
+                                color_discrete_sequence=['#312e81', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe']
                             )
                             fig_donut_fix.update_traces(
                                 textinfo='percent+label',
-                                hovertemplate="<b>%{label}</b><br>Comprometido: R$ %{value:,.2f}<br>Fração: %{percent}<extra></extra>"
+                                hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:,.2f}<br>Representa: %{percent}<extra></extra>"
                             )
                             fig_donut_fix.add_annotation(
                                 text=f"Comprometido<br><b>R$ {total_g_fix:,.2f}</b>",
@@ -556,16 +528,16 @@ if sheet_conn is not None:
                             )
                             st.plotly_chart(fig_donut_fix, use_container_width=True)
                         else:
-                            st.info("Nenhum Gasto Fixo ou Assinatura registrado neste mês.")
+                            st.info("Nenhum custo fixo ou assinatura registrado neste mês.")
                     
                     st.write("---")
                     
+                    # PROPORÇÃO DE RESPONSABILIDADE E HISTÓRICO MENSAL
                     st.markdown("### 📊 Balanço de Participação e Histórico")
                     b_col1, b_col2 = st.columns(2)
                     
                     with b_col1:
                         st.markdown("**Balanço de Gastos Dividido (Proporcional em R$)**")
-                        # Gráfico usa a coluna "Responsavel_Dividido" para computar as proporções corretas pós-divisão
                         df_gasto_resp = df_mes[df_mes['Tipo'] != 'Entrada'].groupby('Responsavel_Dividido')['Valor_Parcela'].sum().reset_index()
                         
                         if not df_gasto_resp.empty:
@@ -592,7 +564,7 @@ if sheet_conn is not None:
                             )
                             st.plotly_chart(fig_barras, use_container_width=True)
                         else:
-                            st.info("Sem dados de despesa para exibir no balanço de divisão.")
+                            st.info("Sem dados de despesa para exibir no balanço.")
                             
                     with b_col2:
                         st.markdown("**Histórico de Evolução Mensal (Receitas vs Despesas)**")
@@ -631,6 +603,7 @@ if sheet_conn is not None:
                     
                     st.write("---")
                     
+                    # EXTRATO MENSAL DETALHADO
                     st.markdown("**Extrato Detalhado do Mês de Competência**")
                     df_mes_tabela = df_mes.drop_duplicates(subset=['Data', 'Descricao', 'Valor', 'Categoria', 'Forma_Pagamento', 'Parcela_Atual'])
                     
@@ -643,6 +616,84 @@ if sheet_conn is not None:
                     df_mes_exibe['Valor Total (R$)'] = df_mes_exibe['Valor Total (R$)'].apply(formatar_valor_tabela)
                     
                     st.dataframe(df_mes_exibe, use_container_width=True)
+                    
+                    # 🟢 3. NOVO MÓDULO HISTÓRICO: Gráfico e Tabela Interativa de Luz / Água / Gás (Consumo Doméstico)
+                    st.write("---")
+                    st.markdown("### 📈 Histórico de Contas de Consumo (Luz / Água / Gás)")
+                    st.markdown("Acompanhe o comportamento das suas principais contas domésticas ao longo dos meses para identificar picos de consumo.")
+                    
+                    # Busca de todas as categorias na planilha
+                    if 'Categoria' in dados_brutos.columns:
+                        categorias_disponiveis = sorted(list(dados_brutos['Categoria'].unique()))
+                    else:
+                        categorias_disponiveis = []
+                    
+                    # Pré-seleciona categorias de consumo comuns
+                    default_contas = [cat for cat in categorias_disponiveis if any(p in cat.lower() for p in ["luz", "água", "agua", "gás", "gas", "energia", "sanepar", "copel"])]
+                    
+                    contas_selecionadas = st.multiselect(
+                        "Selecione quais contas quer analisar no histórico:",
+                        options=categorias_disponiveis,
+                        default=default_contas if default_contas else (categorias_disponiveis[:2] if len(categorias_disponiveis) >= 2 else categorias_disponiveis)
+                    )
+                    
+                    if contas_selecionadas:
+                        df_historico = dados_brutos[dados_brutos['Categoria'].isin(contas_selecionadas)].copy()
+                        
+                        # Função interna de parsing seguro de data
+                        def parse_data_historico(data_val):
+                            try:
+                                return datetime.strptime(str(data_val).split()[0], "%Y-%m-%d").date()
+                            except:
+                                try:
+                                    return datetime.strptime(str(data_val).split()[0], "%d/%m/%Y").date()
+                                except:
+                                    return None
+                        
+                        df_historico['Data_Parsed'] = df_historico['Data'].apply(parse_data_historico)
+                        df_historico = df_historico.dropna(subset=['Data_Parsed'])
+                        df_historico['Valor_Float'] = df_historico['Valor'].apply(tratar_entrada_numerica)
+                        df_historico['Mes_Ano'] = df_historico['Data_Parsed'].apply(lambda x: x.strftime("%Y-%m"))
+                        
+                        if not df_historico.empty:
+                            # Agrupa dados por Período e Conta
+                            df_hist_grouped = df_historico.groupby(['Mes_Ano', 'Categoria'])['Valor_Float'].sum().reset_index()
+                            df_hist_grouped = df_hist_grouped.sort_values('Mes_Ano')
+                            
+                            # Linha temporal Plotly
+                            fig_historico = px.line(
+                                df_hist_grouped,
+                                x='Mes_Ano',
+                                y='Valor_Float',
+                                color='Categoria',
+                                markers=True,
+                                title="Evolução Mensal das Contas de Consumo (R$)",
+                                labels={'Mes_Ano': 'Período', 'Valor_Float': 'Valor Pago (R$)', 'Categoria': 'Conta de Consumo'},
+                                color_discrete_sequence=['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6']
+                            )
+                            fig_historico.update_layout(
+                                xaxis_type='category',
+                                hovermode='x unified',
+                                height=350,
+                                margin=dict(t=40, b=20, l=10, r=10)
+                            )
+                            fig_historico.update_traces(hovertemplate="R$ %{y:,.2f}")
+                            st.plotly_chart(fig_historico, use_container_width=True)
+                            
+                            # Tabela pivotada interativa com formatação brasileira
+                            st.markdown("**Tabela de Valores Detalhados por Período:**")
+                            df_pivot = df_hist_grouped.pivot(index='Mes_Ano', columns='Categoria', values='Valor_Float').fillna(0.0)
+                            df_pivot_exibe = df_pivot.copy()
+                            for col in df_pivot_exibe.columns:
+                                df_pivot_exibe[col] = df_pivot_exibe[col].apply(formatar_brl)
+                            
+                            df_pivot_exibe = df_pivot_exibe.reset_index()
+                            df_pivot_exibe.rename(columns={'Mes_Ano': 'Mês / Ano'}, inplace=True)
+                            st.dataframe(df_pivot_exibe, use_container_width=True)
+                        else:
+                            st.info("Nenhum lançamento com valores válidos encontrado para as categorias selecionadas.")
+                    else:
+                        st.info("Selecione pelo menos uma conta acima para visualizar o histórico de evolução.")
                 else:
                     st.info("Nenhum mês disponível para análise.")
 
@@ -678,11 +729,10 @@ if sheet_conn is not None:
                         
                 with col_direita:
                     st.markdown("### 🔄 Assinaturas e Recorrências Ativas")
-                    # Filtra tanto o tipo antigo de assinatura quanto o novo modelo recorrente
-                    df_assinaturas = df_projetado[df_projetado['Tipo'].isin(['Assinatura', 'Gasto Fixo / Assinatura'])].drop_duplicates(subset=['Descricao'])
+                    df_assinaturas = df_projetado[df_projetado['Tipo'] == 'Assinatura'].drop_duplicates(subset=['Descricao'])
                     if not df_assinaturas.empty:
                         tot_mensal_ass = df_assinaturas['Valor_Parcela'].sum()
-                        st.success(f"📋 **Custo Mensal de Assinaturas/Contas Fixas:** {formatar_brl(tot_mensal_ass)}")
+                        st.success(f"📋 **Custo Mensal de Assinaturas:** {formatar_brl(tot_mensal_ass)}")
                         
                         df_ass_exibe = df_assinaturas[['Descricao', 'Valor_Parcela', 'Categoria', 'Forma_Pagamento']].copy()
                         df_ass_exibe['Valor_Parcela'] = df_ass_exibe['Valor_Parcela'].apply(formatar_brl)
@@ -730,18 +780,6 @@ if sheet_conn is not None:
                         resp_item_raw = str(item_selecionado.get('Responsavel', 'Jonathan'))
                         resp_item_lista = [r.strip() for r in resp_item_raw.split(",") if r.strip()]
                         
-                        # Mapeamento limpo e simplificado para as edições
-                        tipo_map = {
-                            "Gasto Variável": "Gasto Variável",
-                            "Gasto Fixo": "Gasto Fixo",
-                            "Gasto Fixo (Valor Variável)": "Gasto Fixo",
-                            "Assinatura": "Assinatura",
-                            "Gasto Fixo / Assinatura": "Assinatura",
-                            "Entrada": "Entrada"
-                        }
-                        stored_tipo = item_selecionado.get('Tipo', 'Gasto Variável')
-                        mapped_tipo = tipo_map.get(stored_tipo, "Gasto Variável")
-                        
                         st.markdown(f"📍 **Editando Linha {linha_planilha_real} da planilha:**")
                         
                         with st.form("form_edicao"):
@@ -750,39 +788,19 @@ if sheet_conn is not None:
                                 e_data = st.date_input("Nova Data", data_item, format="DD/MM/YYYY")
                                 e_desc = st.text_input("Nova Descrição", value=item_selecionado['Descricao'])
                                 e_valor_texto = st.text_input("Corrigir Valor (R$)", value=valor_antigo_br)
-                                
-                                e_tipo_options = [
-                                    "Gasto Variável", 
-                                    "Gasto Fixo", 
-                                    "Assinatura", 
-                                    "Entrada"
-                                ]
-                                idx_tipo_edicao = e_tipo_options.index(mapped_tipo) if mapped_tipo in e_tipo_options else 0
-                                e_tipo = st.selectbox("Novo Tipo", e_tipo_options, index=idx_tipo_edicao)
-                                
+                                e_tipo = st.selectbox(
+                                    "Novo Tipo", 
+                                    ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"],
+                                    index=["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"].index(item_selecionado['Tipo'])
+                                )
                             with e_col2:
-                                # Reatividade simplificada no formulário de edição
                                 if e_tipo == "Gasto Fixo":
-                                    tipo_ed_salvar = "Gasto Fixo"
-                                    e_lista_cats = ["Luz", "Água", "Plano de Saúde", "Internet (Variável)", "Telefone (Variável)", "Condomínio (Variável)", "Outros Fixos"]
-                                elif e_tipo == "Assinatura":
-                                    tipo_ed_salvar = "Assinatura"
-                                    e_lista_cats = [
-                                        "Internet", 
-                                        "Telefone/Celular", 
-                                        "Aluguel", 
-                                        "Condomínio", 
-                                        "Academia", 
-                                        "Streaming (Netflix/Spotify/Prime)", 
-                                        "Seguro (Carro/Casa)", 
-                                        "Mensalidade Escolar/Curso", 
-                                        "Outras Assinaturas"
-                                    ]
+                                    e_lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
                                 elif e_tipo == "Gasto Variável":
-                                    tipo_ed_salvar = "Gasto Variável"
                                     e_lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
+                                elif e_tipo == "Assinatura":
+                                    e_lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
                                 else: 
-                                    tipo_ed_salvar = "Entrada"
                                     e_lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
                                 
                                 idx_cat_edicao = e_lista_cats.index(item_selecionado['Categoria']) if item_selecionado['Categoria'] in e_lista_cats else 0
@@ -800,8 +818,20 @@ if sheet_conn is not None:
                                     index=["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"].index(item_selecionado['Forma_Pagamento'])
                                 )
                                 
-                                e_parcelado = item_selecionado.get('Parcelado', 'Não')
-                                e_tot_parc = int(item_selecionado.get('Parcelas_Totais', 1))
+                                # 🟢 SOLUÇÃO ELIMINA-BUGS: Agora você pode editar as parcelas livremente em lançamentos antigos
+                                e_pode_parcelar = e_tipo in ["Gasto Variável", "Gasto Fixo"]
+                                if e_pode_parcelar:
+                                    e_tot_parc = st.number_input(
+                                        "Quantidade de Parcelas (Ajustar)", 
+                                        min_value=1, 
+                                        max_value=48, 
+                                        value=int(item_selecionado.get('Parcelas_Totais', 1)) if pd.notna(item_selecionado.get('Parcelas_Totais')) else 1, 
+                                        step=1
+                                    )
+                                    e_parcelado = "Sim" if e_tot_parc > 1 else "Não"
+                                else:
+                                    e_parcelado = "Não"
+                                    e_tot_parc = 1
                                 
                             btn_atualizar = st.form_submit_button("💾 Salvar Alterações")
                             
@@ -815,8 +845,8 @@ if sheet_conn is not None:
                                     valor_ed_gravar = f"{val_novo_float:.2f}".replace(".", ",")
                                     
                                     linha_atualizada = [
-                                        str(e_data), e_desc, valor_ed_gravar, e_cat, tipo_ed_salvar, 
-                                        resp_ed_salvar, e_forma, e_parcelado, e_tot_parc
+                                        str(e_data), e_desc, valor_ed_gravar, e_cat, e_tipo, 
+                                        resp_ed_salvar, e_forma, e_parcelado, int(e_tot_parc)
                                     ]
                                     
                                     try:
