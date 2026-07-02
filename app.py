@@ -28,7 +28,7 @@ hoje_brasil = obter_hoje_brasil()
 # Estilização CSS personalizada para visual premium, animações fluidas e cores Indigo/Emerald
 st.markdown("""
 <style>
-    /* Transições e animações fluidas (Cúbico de Entrada 500ms) */
+    /* Transições e animações fluidas */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
@@ -115,19 +115,17 @@ st.markdown("""
         opacity: 0.8;
     }
 
-    /* Título com estilo premium e sólido */
+    /* Título sólido para evitar erros de renderização em celulares */
     .main-title {
-        color: #1e1b4b; /* Azul escuro premium */
+        color: #1e1b4b; /* Azul Escuro Premium Sólido */
         font-size: 32px;
         font-weight: 800;
         margin-bottom: 5px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
 
+#
 # FUNÇÃO DE CONVERSÃO BRASILEIRA DE MOEDA
 def formatar_brl(valor):
     try:
@@ -203,24 +201,41 @@ def conectar_planilha():
 
 sheet_conn = conectar_planilha()
 
-# LÓGICA DE COBRANÇA DA FATURA (REGRA SOLICITADA POR JONATHAN)
-# Compra em Cartão:
-# Dia 01 até Dia 06 -> Pertence à fatura do MÊS ANTERIOR.
-# Dia 07 em diante -> Pertence à fatura do MÊS ATUAL.
-# Outras formas (Pix, Dinheiro, etc): Mês real do calendário.
+#
+# LÓGICA DE COBRANÇA DA FATURA (CORRIGIDA E ALINHADA COM O SALÁRIO DE JONATHAN)
+# Regra de Cartão de Crédito (Fechamento dia 07 de cada mês):
+# - Compras do dia 01 até o dia 07 -> Pertencem à fatura do MÊS ATUAL (paga com o salário atual).
+# - Compras do dia 08 em diante -> Pertencem à fatura do MÊS SEGUINTE (paga com o próximo salário).
+# Outras formas (Pix, Dinheiro, etc.): Mês calendário real em que o lançamento ocorreu.
 def calcular_mes_competencia(data_compra, forma_pagamento):
-    if "Cartão" not in forma_pagamento:
+    forma_limpa = str(forma_pagamento or "").strip()
+    
+    # Se NÃO for cartão de crédito, pertence exatamente ao mês em que ocorreu (Ex: Salário dia 01/07 pertence a 2026-07)
+    if "Cartão" not in forma_limpa and "Cartao" not in forma_limpa:
         return data_compra.strftime("%Y-%m")
     
     dia = data_compra.day
-    if dia < 7:
-        # Se for entre o dia 1 e dia 6, retrocede 1 mês (Fatura do mês anterior)
-        data_fatura = data_compra - relativedelta(months=1)
-    else:
-        # Se for dia 7 em diante, pertence à fatura do mês atual da compra
+    if dia <= 7:
+        # Se for do dia 1 ao dia 7, pertence à fatura que fecha neste próprio mês atual
         data_fatura = data_compra
+    else:
+        # Se for do dia 8 em diante, a fatura atual já fechou. Pertence à fatura que fecha no mês seguinte.
+        data_fatura = data_compra + relativedelta(months=1)
         
     return data_fatura.strftime("%Y-%m")
+
+# EXTRATOR ROBUSTO DE COLUNAS DA PLANILHA (PREVINE ERROS DE CABEÇALHOS DO GOOGLE SHEETS)
+def obter_coluna_safe(row, *nomes_coluna, fallback=""):
+    row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+    for nome in nomes_coluna:
+        if nome in row_dict:
+            return row_dict[nome]
+        nome_limpo = nome.lower().replace("_", "").replace(" ", "").strip()
+        for k, v in row_dict.items():
+            k_limpo = str(k).lower().replace("_", "").replace(" ", "").strip()
+            if k_limpo == nome_limpo:
+                return v
+    return fallback
 
 # INTERFACE DO USUÁRIO
 st.markdown('<div class="main-title">💰 Controle Financeiro Familiar</div>', unsafe_allow_html=True)
@@ -236,13 +251,14 @@ st.info(f"⏳ **Fechamento de Faturas:** Faltam **{dias_restantes} dias** para o
 
 tabs = st.tabs(["📲 Novo Lançamento", "📊 Dashboard & Resumos", "💳 Controle de Parcelas & Assinaturas", "✏️ Ajustar Lançamentos"])
 
-# TAB 1: FORMULÁRIO DE LANÇAMENTO (OTIMIZADO PARA BRASIL)
+#
+# TAB 1: FORMULÁRIO DE LANÇAMENTO (REATIVO E OTIMIZADO)
 with tabs[0]:
     st.subheader("Registrar Gasto ou Entrada")
     if sheet_conn is None:
         st.info("⚠️ **O formulário de envio está temporariamente desativado devido a problemas de conexão.**")
     else:
-        # "Tipo de Lançamento" fora do formulário para garantir atualização instantânea de categorias
+        # Tipo fora do st.form para reatividade das categorias sem cliques desnecessários
         tipo = st.selectbox("Tipo de Lançamento", ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"])
         
         # Define a lista de categorias baseado no Tipo selecionado
@@ -255,7 +271,6 @@ with tabs[0]:
         else: 
             lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
         
-        # Formulário limpo e otimizado
         with st.form("form_lancamento", clear_on_submit=True):
             col1, col2 = st.columns([1, 1])
             with col1:
@@ -274,16 +289,16 @@ with tabs[0]:
                 
                 forma_pagto = st.selectbox("Forma de Pagamento", ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"])
                 
-                # 🟢 SOLUÇÃO ELIMINA-BUGS: Sempre exibe o número de parcelas para despesas sem depender de clicks lentos
+                # Exibição permanente de parcelamento para evitar bugs de reatividade lenta
                 pode_parcelar = tipo in ["Gasto Variável", "Gasto Fixo"]
                 if pode_parcelar:
                     num_parcelas = st.number_input(
-                        "Quantidade de Parcelas (Mantenha 1 se for à vista)", 
+                        "Quantidade de Parcelas (Deixe 1 se for à vista)", 
                         min_value=1, 
                         max_value=48, 
                         value=1, 
                         step=1,
-                        help="Se for uma compra parcelada, informe a quantidade total de parcelas. Se for à vista, deixe em 1."
+                        help="Se for uma compra parcelada, informe a quantidade total de parcelas. Se for à vista, mantenha 1."
                     )
                     parcelado = "Sim" if num_parcelas > 1 else "Não"
                 else:
@@ -296,7 +311,7 @@ with tabs[0]:
                 val_float = tratar_entrada_numerica(valor_texto)
                 
                 if not responsavel:
-                    st.error("Por favor, selecione pelo menos um responsável pelo gasto.")
+                    st.error("Por favor, selecione pelo menos um responsável pelo lançamento.")
                 elif descricao and val_float > 0:
                     resp_salvar = ", ".join(responsavel)
                     valor_gravar_sheets = f"{val_float:.2f}".replace(".", ",")
@@ -314,6 +329,7 @@ with tabs[0]:
                 else:
                     st.error("Por favor, preencha a descrição e um valor decimal válido maior que zero (Exemplo: 8,99).")
 
+#
 # INTERPRETAÇÃO E PROJEÇÃO DOS DADOS
 if sheet_conn is not None:
     try:
@@ -323,30 +339,34 @@ if sheet_conn is not None:
         st.warning("Aguardando lançamentos na aba 'Lancamentos' para carregar os gráficos.")
 
     if not dados_brutos.empty:
-        # Processar projeções de parcelas futuras e assinaturas em memória
+        # Processamento e projeção blindada em memória
         lista_projetada = []
         for index, row in dados_brutos.iterrows():
+            # Extração segura das colunas para evitar incompatibilidades físicas na planilha
+            data_raw = obter_coluna_safe(row, 'Data', 'data', fallback='')
+            if not data_raw:
+                continue
+                
             try:
-                if not row.get('Data'):
-                    continue
-                dt_compra = datetime.strptime(str(row['Data']).split()[0], "%Y-%m-%d").date()
-            except Exception as parse_error:
+                dt_compra = datetime.strptime(str(data_raw).split()[0], "%Y-%m-%d").date()
+            except:
                 try:
-                    dt_compra = datetime.strptime(str(row['Data']).split()[0], "%d/%m/%Y").date()
+                    dt_compra = datetime.strptime(str(data_raw).split()[0], "%d/%m/%Y").date()
                 except:
                     continue
             
-            valor_raw = row.get('Valor', 0.0)
-            if isinstance(valor_raw, str):
-                valor_total = tratar_entrada_numerica(valor_raw)
-            else:
-                valor_total = float(valor_raw)
-                
-            tipo_lanc = row.get('Tipo', 'Gasto Variável')
-            total_parc = int(row['Parcelas_Totais']) if row.get('Parcelas_Totais') and pd.notna(row.get('Parcelas_Totais')) else 1
+            valor_raw = obter_coluna_safe(row, 'Valor', 'valor', fallback=0.0)
+            valor_total = tratar_entrada_numerica(valor_raw) if isinstance(valor_raw, str) else float(valor_raw)
+            
+            tipo_lanc = obter_coluna_safe(row, 'Tipo', 'tipo_lancamento', fallback='Gasto Variável')
+            forma_pagto = obter_coluna_safe(row, 'Forma_Pagamento', 'forma_pagto', 'Forma de Pagamento', fallback='Dinheiro')
+            parcelado_status = obter_coluna_safe(row, 'Parcelado', 'parcelado', fallback='Não')
+            
+            total_parc_raw = obter_coluna_safe(row, 'Parcelas_Totais', 'parcelas_totais', 'Parcelas', fallback=1)
+            total_parc = int(total_parc_raw) if total_parc_raw and pd.notna(total_parc_raw) else 1
             
             # Divisão proporcional de responsáveis
-            resp_raw = str(row.get('Responsavel', 'Jonathan'))
+            resp_raw = str(obter_coluna_safe(row, 'Responsavel', 'responsável', fallback='Jonathan'))
             responsaveis_list = [r.strip() for r in resp_raw.split(",") if r.strip()]
             if not responsaveis_list:
                 responsaveis_list = ["Jonathan"]
@@ -357,7 +377,7 @@ if sheet_conn is not None:
             if tipo_lanc == "Assinatura":
                 for m in range(12):
                     dt_recorrente = dt_compra + relativedelta(months=m)
-                    mes_competencia = calcular_mes_competencia(dt_recorrente, row.get('Forma_Pagamento', 'Dinheiro'))
+                    mes_competencia = calcular_mes_competencia(dt_recorrente, forma_pagto)
                     
                     for resp in responsaveis_list:
                         item_proj = row.to_dict()
@@ -365,14 +385,15 @@ if sheet_conn is not None:
                         item_proj['Valor_Parcela'] = valor_total / divisao_pessoas
                         item_proj['Responsavel_Dividido'] = resp
                         item_proj['Parcela_Atual'] = "Recorrente"
+                        item_proj['Data_Exibicao'] = dt_compra.strftime("%d/%m/%Y")
                         lista_projetada.append(item_proj)
             else:
-                # Compras normais e parceladas
-                is_parcelado = str(row.get('Parcelado')).strip() == 'Sim'
+                # Compras normais, à vista ou parceladas
+                is_parcelado = str(parcelado_status).strip() == 'Sim'
                 val_parcela = valor_total / total_parc if is_parcelado and total_parc > 0 else valor_total
                 for p in range(total_parc):
                     dt_parcela = dt_compra + relativedelta(months=p)
-                    mes_competencia = calcular_mes_competencia(dt_parcela, row.get('Forma_Pagamento', 'Dinheiro'))
+                    mes_competencia = calcular_mes_competencia(dt_parcela, forma_pagto)
                     
                     for resp in responsaveis_list:
                         item_proj = row.to_dict()
@@ -380,23 +401,15 @@ if sheet_conn is not None:
                         item_proj['Valor_Parcela'] = val_parcela / divisao_pessoas
                         item_proj['Responsavel_Dividido'] = resp
                         item_proj['Parcela_Atual'] = f"{p+1}/{total_parc}" if is_parcelado else "1/1"
+                        item_proj['Data_Exibicao'] = dt_compra.strftime("%d/%m/%Y")
                         lista_projetada.append(item_proj)
                 
         if lista_projetada:
             df_projetado = pd.DataFrame(lista_projetada)
             df_projetado['Valor_Parcela'] = df_projetado['Valor_Parcela'].astype(float)
             
-            # Traduzir a exibição da data nas tabelas
-            def formatar_data_br(data_str):
-                try:
-                    dt = datetime.strptime(str(data_str).split()[0], "%Y-%m-%d")
-                    return dt.strftime("%d/%m/%Y")
-                except:
-                    return data_str
-            
-            df_projetado['Data_Exibicao'] = df_projetado['Data'].apply(formatar_data_br)
-            
-            # TAB 2: DASHBOARD
+            #            
+            # TAB 2: DASHBOARD & RESUMOS
             with tabs[1]:
                 st.subheader("Resumo Mensal e Faturas")
                 
@@ -409,7 +422,7 @@ if sheet_conn is not None:
                     
                     df_mes = df_projetado[df_projetado['Mes_Fatura'] == mes_selecionado]
                     
-                    # KPIs Principais
+                    # Cômputo dos KPIs principais do mês de competência selecionado
                     tot_entradas = df_mes[df_mes['Tipo'] == 'Entrada']['Valor_Parcela'].sum()
                     tot_saidas = df_mes[df_mes['Tipo'] != 'Entrada']['Valor_Parcela'].sum()
                     
@@ -418,7 +431,7 @@ if sheet_conn is not None:
                     
                     saldo_final = tot_entradas - tot_saidas
                     
-                    # KPIs VISUAIS
+                    # Painel de KPIs moderno em colunas
                     kpi_c1, kpi_c2, kpi_c3, kpi_c4 = st.columns(4)
                     
                     with kpi_c1:
@@ -426,7 +439,7 @@ if sheet_conn is not None:
                         <div class="kpi-container kpi-entradas">
                             <div class="kpi-title">🟢 Total Entradas</div>
                             <div class="kpi-value">{formatar_brl(tot_entradas)}</div>
-                            <div class="kpi-subtitle">Salários & Receitas</div>
+                            <div class="kpi-subtitle">Salário e Restituições</div>
                         </div>
                         """, unsafe_allow_html=True)
                         
@@ -435,7 +448,7 @@ if sheet_conn is not None:
                         <div class="kpi-container kpi-saidas">
                             <div class="kpi-title">🔴 Total Despesas</div>
                             <div class="kpi-value">{formatar_brl(tot_saidas)}</div>
-                            <div class="kpi-subtitle">Balanço: {formatar_brl(saldo_final)} de saldo</div>
+                            <div class="kpi-subtitle">Balanço: {formatar_brl(saldo_final)}</div>
                         </div>
                         """, unsafe_allow_html=True)
                         
@@ -444,7 +457,7 @@ if sheet_conn is not None:
                         <div class="kpi-container kpi-nu">
                             <div class="kpi-title">💳 Fatura Nu Bank</div>
                             <div class="kpi-value">{formatar_brl(fatura_nu)}</div>
-                            <div class="kpi-subtitle">Competência {mes_selecionado}</div>
+                            <div class="kpi-subtitle">Fatura de {mes_selecionado}</div>
                         </div>
                         """, unsafe_allow_html=True)
                         
@@ -453,18 +466,17 @@ if sheet_conn is not None:
                         <div class="kpi-container kpi-bb">
                             <div class="kpi-title">💳 Fatura BB</div>
                             <div class="kpi-value">{formatar_brl(fatura_bb)}</div>
-                            <div class="kpi-subtitle">Vence nos próximos dias</div>
+                            <div class="kpi-subtitle">Fatura de {mes_selecionado}</div>
                         </div>
                         """, unsafe_allow_html=True)
                     
                     st.write("---")
                     
-                    # SEÇÃO DE GRÁFICOS SEPARADOS (ATENDENDO SOLICITAÇÃO DE JONATHAN)
-                    st.markdown("### 📊 Análise de Despesas do Mês")
-                    
+                    #                    
+                    # SEÇÃO DE ANÁLISE DE GASTOS SEPARADOS (Variáveis vs. Fixos/Assinaturas)
+                    st.markdown("### 📊 Análise Setorial do Orçamento")
                     g_col1, g_col2 = st.columns(2)
                     
-                    # 1. GRÁFICO EXCLUSIVO: GASTOS VARIÁVEIS (Foco de Controle Ativo de Despesas)
                     with g_col1:
                         st.markdown("**💸 Gastos Variáveis (Controle Ativo e Flexível)**")
                         df_gasto_var = df_mes[df_mes['Tipo'] == 'Gasto Variável'].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
@@ -497,7 +509,6 @@ if sheet_conn is not None:
                         else:
                             st.info("Nenhum Gasto Variável registrado neste período.")
                             
-                    # 2. GRÁFICO EXCLUSIVO: GASTOS FIXOS & ASSINATURAS (Estrutura e Custos Fixados)
                     with g_col2:
                         st.markdown("**🔒 Gastos Fixos & Assinaturas (Custo Estrutural)**")
                         df_gasto_fix = df_mes[df_mes['Tipo'].isin(['Gasto Fixo', 'Assinatura'])].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
@@ -516,7 +527,7 @@ if sheet_conn is not None:
                                 hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:,.2f}<br>Representa: %{percent}<extra></extra>"
                             )
                             fig_donut_fix.add_annotation(
-                                text=f"Comprometido<br><b>R$ {total_g_fix:,.2f}</b>",
+                                text=f"Estrutural<br><b>R$ {total_g_fix:,.2f}</b>",
                                 showarrow=False,
                                 font_size=15,
                                 font_color="#1e1b4b"
@@ -532,8 +543,8 @@ if sheet_conn is not None:
                     
                     st.write("---")
                     
-                    # PROPORÇÃO DE RESPONSABILIDADE E HISTÓRICO MENSAL
-                    st.markdown("### 📊 Balanço de Participação e Histórico")
+                    # DIVISÃO DE PARTICIPAÇÃO E HISTÓRICO MENSAL
+                    st.markdown("### 👥 Balanço de Participação e Histórico")
                     b_col1, b_col2 = st.columns(2)
                     
                     with b_col1:
@@ -603,7 +614,7 @@ if sheet_conn is not None:
                     
                     st.write("---")
                     
-                    # EXTRATO MENSAL DETALHADO
+                    # EXTRATO DETALHADO DO MÊS
                     st.markdown("**Extrato Detalhado do Mês de Competência**")
                     df_mes_tabela = df_mes.drop_duplicates(subset=['Data', 'Descricao', 'Valor', 'Categoria', 'Forma_Pagamento', 'Parcela_Atual'])
                     
@@ -617,22 +628,17 @@ if sheet_conn is not None:
                     
                     st.dataframe(df_mes_exibe, use_container_width=True)
                     
-                    # 🟢 3. NOVO MÓDULO HISTÓRICO: Gráfico e Tabela Interativa de Luz / Água / Gás (Consumo Doméstico)
+                    #                    
+                    # HISTÓRICO DE CONSUMO DE UTILITÁRIOS (Luz / Água / Gás)
                     st.write("---")
                     st.markdown("### 📈 Histórico de Contas de Consumo (Luz / Água / Gás)")
-                    st.markdown("Acompanhe o comportamento das suas principais contas domésticas ao longo dos meses para identificar picos de consumo.")
+                    st.markdown("Acompanhe o consumo das principais utilidades domésticas ao longo dos meses para monitorar picos de consumo.")
                     
-                    # Busca de todas as categorias na planilha
-                    if 'Categoria' in dados_brutos.columns:
-                        categorias_disponiveis = sorted(list(dados_brutos['Categoria'].unique()))
-                    else:
-                        categorias_disponiveis = []
-                    
-                    # Pré-seleciona categorias de consumo comuns
-                    default_contas = [cat for cat in categorias_disponiveis if any(p in cat.lower() for p in ["luz", "água", "agua", "gás", "gas", "energia", "sanepar", "copel"])]
+                    categorias_disponiveis = sorted(list(dados_brutos['Categoria'].unique())) if 'Categoria' in dados_brutos.columns else []
+                    default_contas = [cat for cat in categorias_disponiveis if any(p in cat.lower() for p in ["luz", "água", "agua", "gás", "gas", "copel", "sanepar"])]
                     
                     contas_selecionadas = st.multiselect(
-                        "Selecione quais contas quer analisar no histórico:",
+                        "Selecione as contas para análise no histórico:",
                         options=categorias_disponiveis,
                         default=default_contas if default_contas else (categorias_disponiveis[:2] if len(categorias_disponiveis) >= 2 else categorias_disponiveis)
                     )
@@ -640,7 +646,6 @@ if sheet_conn is not None:
                     if contas_selecionadas:
                         df_historico = dados_brutos[dados_brutos['Categoria'].isin(contas_selecionadas)].copy()
                         
-                        # Função interna de parsing seguro de data
                         def parse_data_historico(data_val):
                             try:
                                 return datetime.strptime(str(data_val).split()[0], "%Y-%m-%d").date()
@@ -656,32 +661,24 @@ if sheet_conn is not None:
                         df_historico['Mes_Ano'] = df_historico['Data_Parsed'].apply(lambda x: x.strftime("%Y-%m"))
                         
                         if not df_historico.empty:
-                            # Agrupa dados por Período e Conta
                             df_hist_grouped = df_historico.groupby(['Mes_Ano', 'Categoria'])['Valor_Float'].sum().reset_index()
                             df_hist_grouped = df_hist_grouped.sort_values('Mes_Ano')
                             
-                            # Linha temporal Plotly
                             fig_historico = px.line(
                                 df_hist_grouped,
                                 x='Mes_Ano',
                                 y='Valor_Float',
                                 color='Categoria',
                                 markers=True,
-                                title="Evolução Mensal das Contas de Consumo (R$)",
-                                labels={'Mes_Ano': 'Período', 'Valor_Float': 'Valor Pago (R$)', 'Categoria': 'Conta de Consumo'},
+                                title="Evolução Mensal de Contas Domésticas (R$)",
+                                labels={'Mes_Ano': 'Período', 'Valor_Float': 'Valor Pago (R$)', 'Categoria': 'Conta'},
                                 color_discrete_sequence=['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6']
                             )
-                            fig_historico.update_layout(
-                                xaxis_type='category',
-                                hovermode='x unified',
-                                height=350,
-                                margin=dict(t=40, b=20, l=10, r=10)
-                            )
+                            fig_historico.update_layout(xaxis_type='category', hovermode='x unified', height=350)
                             fig_historico.update_traces(hovertemplate="R$ %{y:,.2f}")
                             st.plotly_chart(fig_historico, use_container_width=True)
                             
-                            # Tabela pivotada interativa com formatação brasileira
-                            st.markdown("**Tabela de Valores Detalhados por Período:**")
+                            st.markdown("**Valores Detalhados por Período:**")
                             df_pivot = df_hist_grouped.pivot(index='Mes_Ano', columns='Categoria', values='Valor_Float').fillna(0.0)
                             df_pivot_exibe = df_pivot.copy()
                             for col in df_pivot_exibe.columns:
@@ -692,17 +689,15 @@ if sheet_conn is not None:
                             st.dataframe(df_pivot_exibe, use_container_width=True)
                         else:
                             st.info("Nenhum lançamento com valores válidos encontrado para as categorias selecionadas.")
-                    else:
-                        st.info("Selecione pelo menos uma conta acima para visualizar o histórico de evolução.")
                 else:
                     st.info("Nenhum mês disponível para análise.")
 
+            #
             # TAB 3: CONTROLE DE PARCELAS ACUMULADAS E ASSINATURAS
             with tabs[2]:
                 st.subheader("Dívidas Parceladas e Controle de Assinaturas")
                 
                 hoje_str = hoje_brasil.strftime("%Y-%m")
-                
                 df_futuro = df_projetado[(df_projetado['Mes_Fatura'] > hoje_str) & (df_projetado['Parcelado'] == 'Sim')]
                 saldo_devedor_futuro = df_futuro['Valor_Parcela'].sum()
                 
@@ -714,10 +709,8 @@ if sheet_conn is not None:
                     st.markdown("### 💳 Cronograma de Parcelamentos")
                     if not df_futuro.empty:
                         cronograma = df_futuro.groupby(['Mes_Fatura', 'Forma_Pagamento'])['Valor_Parcela'].sum().unstack().fillna(0)
-                        
                         for col in cronograma.columns:
                             cronograma[col] = cronograma[col].apply(formatar_brl)
-                        
                         st.dataframe(cronograma, use_container_width=True)
                         
                         st.markdown("**Detalhe das Parcelas Futuras**")
@@ -725,7 +718,7 @@ if sheet_conn is not None:
                         df_futuro_exibe['Valor_Parcela'] = df_futuro_exibe['Valor_Parcela'].apply(formatar_brl)
                         st.dataframe(df_futuro_exibe, use_container_width=True)
                     else:
-                        st.info("Muito bom! Você não tem compras parceladas para os próximos meses.")
+                        st.info("Muito bem! Você não tem compras parceladas para os próximos meses.")
                         
                 with col_direita:
                     st.markdown("### 🔄 Assinaturas e Recorrências Ativas")
@@ -740,13 +733,13 @@ if sheet_conn is not None:
                     else:
                         st.info("Nenhuma assinatura cadastrada.")
 
+            #
             # TAB 4: EDITAR E CORRIGIR LANÇAMENTOS
             with tabs[3]:
                 st.subheader("Corrigir ou Apagar Lançamentos")
                 st.markdown("Selecione um lançamento da lista para editar os valores ou apagá-los de forma instantânea.")
                 
                 df_editor = dados_brutos.copy()
-                
                 if not df_editor.empty:
                     df_editor = df_editor.iloc[::-1].reset_index(drop=True)
                     
@@ -757,12 +750,10 @@ if sheet_conn is not None:
                         return f"{data_formatada} | {row.get('Descricao', 'Sem Descrição')} | {v_brl} ({row.get('Forma_Pagamento', 'Pix')})"
                     
                     df_editor['Identificacao_Opcao'] = df_editor.apply(gerar_linha_opcao, axis=1)
-                    
                     selecao = st.selectbox("Selecione qual item quer alterar ou excluir:", df_editor['Identificacao_Opcao'])
                     
                     if selecao:
                         item_selecionado = df_editor[df_editor['Identificacao_Opcao'] == selecao].iloc[0]
-                        
                         idx_dataframe = df_editor[df_editor['Identificacao_Opcao'] == selecao].index[0]
                         linha_planilha_real = (len(dados_brutos) - idx_dataframe) + 1
                         
@@ -818,11 +809,11 @@ if sheet_conn is not None:
                                     index=["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"].index(item_selecionado['Forma_Pagamento'])
                                 )
                                 
-                                # 🟢 SOLUÇÃO ELIMINA-BUGS: Agora você pode editar as parcelas livremente em lançamentos antigos
+                                # Edição de parcelas direta na correção de lançamentos antigos
                                 e_pode_parcelar = e_tipo in ["Gasto Variável", "Gasto Fixo"]
                                 if e_pode_parcelar:
                                     e_tot_parc = st.number_input(
-                                        "Quantidade de Parcelas (Ajustar)", 
+                                        "Quantidade de Parcelas (Corrigir)", 
                                         min_value=1, 
                                         max_value=48, 
                                         value=int(item_selecionado.get('Parcelas_Totais', 1)) if pd.notna(item_selecionado.get('Parcelas_Totais')) else 1, 
@@ -837,7 +828,6 @@ if sheet_conn is not None:
                             
                             if btn_atualizar:
                                 val_novo_float = tratar_entrada_numerica(e_valor_texto)
-                                
                                 if not e_resp:
                                     st.error("Selecione pelo menos um responsável.")
                                 elif e_desc and val_novo_float > 0:
@@ -848,15 +838,14 @@ if sheet_conn is not None:
                                         str(e_data), e_desc, valor_ed_gravar, e_cat, e_tipo, 
                                         resp_ed_salvar, e_forma, e_parcelado, int(e_tot_parc)
                                     ]
-                                    
                                     try:
                                         sheet_conn.update(f"A{linha_planilha_real}:I{linha_planilha_real}", [linha_atualizada], value_input_option='USER_ENTERED')
-                                        st.success("Lançamento atualizado com sucesso! Reiniciando visualização...")
+                                        st.success("Lançamento atualizado com sucesso! Reiniciando...")
                                         st.rerun()
                                     except Exception as err:
                                         st.error(f"Erro ao salvar modificação: {err}")
                         
-                        # EXCLUSÃO
+                        # EXCLUSÃO DEFINITIVA
                         st.markdown("---")
                         st.markdown("### ⚠️ Zona de Perigo")
                         confirmar_exclusao = st.checkbox("Eu quero excluir permanentemente este lançamento da minha planilha.")
