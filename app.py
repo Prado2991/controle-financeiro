@@ -977,4 +977,3 @@ if sheet_conn is not None:
                     st.info("A planilha está vazia.")
 else:
     st.info("Aguardando os primeiros dados da planilha para renderizar os gráficos.")
-```
