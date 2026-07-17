@@ -9,6 +9,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pytz
 
+# Configuração da página do Streamlit
 st.set_page_config(
     page_title="Finanças Jonathan", 
     page_icon="💰", 
@@ -115,16 +116,35 @@ st.markdown("""
 
     /* Título Sólido Premium para Celulares */
     .main-title {
-        color: #1e1b4b; /* Azul Escuro Premium Sólido (Livre de bugs de gradiente) */
+        color: #1e1b4b; /* Azul Escuro Premium Sólido */
         font-size: 32px;
         font-weight: 800;
         margin-bottom: 5px;
     }
+
+    /* Estilo para os Cards de Gráficos no Dashboard */
+    .dashboard-card {
+        background-color: #ffffff;
+        padding: 24px;
+        border-radius: 12px;
+        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+        border: 1px solid #f1f5f9;
+        margin-bottom: 20px;
+    }
+
+    .dashboard-card-title {
+        color: #0f172a;
+        font-size: 18px;
+        font-weight: 700;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-
-# Traduzir e formatar a exibição da data para o formato brasileiro
+# Traduzir e formatar a exibição da data para o formato brasileiro de forma segura e global
 def formatar_data_br(data_str):
     if not data_str:
         return ""
@@ -148,7 +168,7 @@ def formatar_brl(valor):
     except:
         return "R$ 0,00"
 
-# TRATAMENTO NUMÉRICO DE ENTRADA
+# TRATEMENTO NUMÉRICO DE ENTRADA RESILIENTE
 def tratar_entrada_numerica(texto_valor):
     if not texto_valor:
         return 0.0
@@ -162,6 +182,41 @@ def tratar_entrada_numerica(texto_valor):
         return round(val_float, 2)
     except Exception as e:
         return 0.0
+
+# Categorias base do sistema (estabilizadas por tipo)
+base_cats = {
+    "Gasto Fixo": ["Luz", "Água", "Gás", "Diarista", "Psicóloga", "Pagamento do cartão", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"],
+    "Gasto Variável": ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Barbearia", "Lotérica", "Outros Variáveis"],
+    "Assinatura": ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"],
+    "Entrada": ["Salário", "Rendimento", "Pix Recebido", "Diárias", "Outras Entradas"]
+}
+
+# Função de carregamento dinâmico de categorias com detecção automática de novos itens da planilha
+def obter_categorias_por_tipo(tipo, df_bruto=None):
+    cats = base_cats.get(tipo, []).copy()
+    if df_bruto is not None and not df_bruto.empty:
+        col_categoria = None
+        col_tipo = None
+        # Identificação resiliente de cabeçalho (independente de acentos e caixa)
+        for col in df_bruto.columns:
+            col_limpa = str(col).lower().replace("_", "").replace(" ", "").strip()
+            if col_limpa == 'categoria':
+                col_categoria = col
+            elif col_limpa == 'tipo':
+                col_tipo = col
+                
+        if col_categoria and col_tipo:
+            unique_cats = df_bruto[df_bruto[col_tipo] == tipo][col_categoria].dropna().unique()
+            for c in unique_cats:
+                c_str = str(c).strip()
+                if c_str and c_str not in cats and c_str != "Outra (Criar Nova...)":
+                    cats.append(c_str)
+                    
+    # Garante que a opção de criar nova categoria personalizada sempre esteja em último no seletor
+    if "Outra (Criar Nova...)" in cats:
+        cats.remove("Outra (Criar Nova...)")
+    cats.append("Outra (Criar Nova...)")
+    return cats
 
 def conectar_planilha():
     scope = [
@@ -214,27 +269,25 @@ def conectar_planilha():
 
 sheet_conn = conectar_planilha()
 
-
 # LÓGICA DE COBRANÇA DA FATURA (ALINHADO COM FLUXO REAL DE FECHAMENTO JONATHAN)
-# Compra em Cartão:
-# Dia 01 até Dia 06 -> Pertence à fatura do MÊS ANTERIOR (Ex: compra em 03/07 no cartão pertence ao mês 06 - Junho)
-# Dia 07 em diante -> Pertence à fatura do MÊS ATUAL (Ex: compra em 15/06 no cartão pertence ao mês 06 - Junho)
-# Entradas (Salário, Restituições, Pix): Sempre Mês calendário real do evento, sem recuar.
+# Ciclo de faturamento: O cartão fecha no dia 06.
+# Portanto, todos os gastos de 07/06 até 06/07 pertencem ao Mês de Consumo 06 (Junho).
+# Entradas (Salários, Diárias, Pix): Sempre no mês calendário real do recebimento, sem recuar.
 def calcular_mes_competencia(data_compra, forma_pagamento, tipo_lancamento):
     if tipo_lancamento == "Entrada" or "Cartão" not in str(forma_pagamento):
         return data_compra.strftime("%Y-%m")
     
     dia = data_compra.day
     if dia < 7:
-        # Se for entre o dia 1 e dia 6, retrocede 1 mês (Fatura do mês anterior)
+        # Se for entre o dia 1 e dia 6, pertence ao faturamento do mês anterior
         data_fatura = data_compra - relativedelta(months=1)
     else:
-        # Se for dia 7 em diante, pertence à fatura do próprio mês atual da compra
+        # Se for dia 7 em diante, pertence ao faturamento do mês atual
         data_fatura = data_compra
         
     return data_fatura.strftime("%Y-%m")
 
-# EXTRATOR ROBUSTO DE COLUNAS DA PLANILHA (PREVINE INCONSISTÊNCIAS DE MAIÚSCULAS/ESPAÇOS NO GOOGLE SHEETS)
+# EXTRATOR ROBUSTO DE COLUNAS DA PLANILHA (PREVINE INCONSISTÊNCIAS NO GOOGLE SHEETS)
 def obter_coluna_safe(row, *nomes_coluna, fallback=""):
     row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
     for nome in nomes_coluna:
@@ -246,6 +299,15 @@ def obter_coluna_safe(row, *nomes_coluna, fallback=""):
             if k_limpo == nome_limpo:
                 return v
     return fallback
+
+# Carregamento prévio de dados brutos para alimentar listagens dinâmicas
+if sheet_conn is not None:
+    try:
+        dados_brutos = pd.DataFrame(sheet_conn.get_all_records())
+    except Exception as e:
+        dados_brutos = pd.DataFrame()
+else:
+    dados_brutos = pd.DataFrame()
 
 st.markdown('<div class="main-title">💰 Controle Financeiro Familiar</div>', unsafe_allow_html=True)
 st.markdown("### Jonathan Prado")
@@ -268,29 +330,27 @@ with tabs[0]:
         # Escolha do Tipo de Lançamento fora do formulário para reatividade instantânea das categorias
         tipo = st.selectbox("Tipo de Lançamento", ["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"])
         
-        # Define a lista de categorias baseado no Tipo selecionado
-        if tipo == "Gasto Fixo":
-            lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
-        elif tipo == "Gasto Variável":
-            lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
-        elif tipo == "Assinatura":
-            lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
-        else: 
-            lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
+        # Pega a lista dinâmica de categorias para o tipo selecionado (mesclando com itens do banco de dados)
+        lista_cats = obter_categorias_por_tipo(tipo, dados_brutos)
         
         with st.form("form_lancamento", clear_on_submit=True):
             col1, col2 = st.columns([1, 1])
             with col1:
                 data = st.date_input("Data do Lançamento", hoje_brasil, format="DD/MM/YYYY")
-                descricao = st.text_input("Descrição", placeholder="Ex: Sorveteria Sávio, Roupas na Shein, Mercado Muffato")
+                descricao = st.text_input("Descrição", placeholder="Ex: Mercado Muffato, Barbearia, Diária Consultório")
                 valor_texto = st.text_input("Valor (R$)", value="0,00", help="Use vírgula para centavos. Exemplo: 8,99 ou 150,50")
             
             with col2:
-                categoria = st.selectbox("Categoria", lista_cats)
+                categoria_sel = st.selectbox("Categoria", lista_cats)
+                
+                # Exibe input de categoria customizada se a opção for criar nova
+                nova_categoria = ""
+                if categoria_sel == "Outra (Criar Nova...)":
+                    nova_categoria = st.text_input("Nome da nova Categoria:", placeholder="Digite o nome aqui (Ex: IPVA, Dentista)")
                 
                 responsavel = st.multiselect(
                     "Para Quem?", 
-                    ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"],
+                    ["Jonathan", "Casa", "Gatos"],
                     default=["Jonathan"]
                 )
                 
@@ -300,7 +360,7 @@ with tabs[0]:
                 else:
                     forma_pagto = st.selectbox("Forma de Pagamento", ["Cartão Nu", "Cartão BB", "Pix", "Dinheiro", "Boleto", "Débito em conta"])
                 
-                # Seletor de parcelamento direto e robusto (Sem travar o formulário)
+                # Seletor de parcelamento direto e robusto
                 pode_parcelar = tipo in ["Gasto Variável", "Gasto Fixo"]
                 if pode_parcelar:
                     num_parcelas = st.number_input(
@@ -321,6 +381,15 @@ with tabs[0]:
             if botao_salvar:
                 val_float = tratar_entrada_numerica(valor_texto)
                 
+                # Resolve categoria personalizada caso selecionado
+                categoria_gravar = categoria_sel
+                if categoria_sel == "Outra (Criar Nova...)":
+                    if not nova_categoria.strip():
+                        st.error("❌ **Erro:** Digite um nome para a nova categoria personalizada!")
+                        st.stop()
+                    else:
+                        categoria_gravar = nova_categoria.strip().title()
+                
                 if not responsavel:
                     st.error("Por favor, selecione pelo menos um responsável pelo lançamento.")
                 elif descricao and val_float > 0:
@@ -328,25 +397,20 @@ with tabs[0]:
                     valor_gravar_sheets = f"{val_float:.2f}".replace(".", ",")
                     
                     novo_registro = [
-                        str(data), descricao, valor_gravar_sheets, categoria, tipo, 
+                        str(data), descricao, valor_gravar_sheets, categoria_gravar, tipo, 
                         resp_salvar, forma_pagto, parcelado, int(num_parcelas)
                     ]
                     try:
                         sheet_conn.append_row(novo_registro, value_input_option='USER_ENTERED')
                         st.success(f"Sucesso! '{descricao}' gravado com o valor de {formatar_brl(val_float)}.")
                         st.balloons()
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Erro ao salvar na planilha: {e}")
                 else:
                     st.error("Por favor, preencha a descrição e um valor decimal válido maior que zero (Exemplo: 8,99).")
 
 if sheet_conn is not None:
-    try:
-        dados_brutos = pd.DataFrame(sheet_conn.get_all_records())
-    except Exception as e:
-        dados_brutos = pd.DataFrame()
-        st.warning("Aguardando lançamentos na aba 'Lancamentos' para carregar os gráficos.")
-
     if not dados_brutos.empty:
         lista_projetada = []
         for index, row in dados_brutos.iterrows():
@@ -445,7 +509,7 @@ if sheet_conn is not None:
                         <div class="kpi-container kpi-entradas">
                             <div class="kpi-title">🟢 Total Entradas</div>
                             <div class="kpi-value">{formatar_brl(tot_entradas)}</div>
-                            <div class="kpi-subtitle">Salário e Receitas</div>
+                            <div class="kpi-subtitle">Salário e Diárias</div>
                         </div>
                         """, unsafe_allow_html=True)
                         
@@ -482,7 +546,8 @@ if sheet_conn is not None:
                     g_col1, g_col2 = st.columns(2)
                     
                     with g_col1:
-                        st.markdown("**💸 Gastos Variáveis (Controle Ativo e Flexível)**")
+                        st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+                        st.markdown('<div class="dashboard-card-title">💸 Gastos Variáveis (Controle Ativo e Flexível)</div>', unsafe_allow_html=True)
                         df_gasto_var = df_mes[df_mes['Tipo'] == 'Gasto Variável'].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
                         
                         if not df_gasto_var.empty:
@@ -512,9 +577,11 @@ if sheet_conn is not None:
                             st.plotly_chart(fig_donut_var, use_container_width=True)
                         else:
                             st.info("Nenhum Gasto Variável registrado neste período.")
+                        st.markdown('</div>', unsafe_allow_html=True)
                             
                     with g_col2:
-                        st.markdown("**🔒 Gastos Fixos & Assinaturas (Custo Estrutural)**")
+                        st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+                        st.markdown('<div class="dashboard-card-title">🔒 Gastos Fixos & Assinaturas (Custo Estrutural)</div>', unsafe_allow_html=True)
                         df_gasto_fix = df_mes[df_mes['Tipo'].isin(['Gasto Fixo', 'Assinatura'])].groupby('Categoria')['Valor_Parcela'].sum().reset_index()
                         
                         if not df_gasto_fix.empty:
@@ -544,6 +611,7 @@ if sheet_conn is not None:
                             st.plotly_chart(fig_donut_fix, use_container_width=True)
                         else:
                             st.info("Nenhum custo fixo ou assinatura registrado neste mês.")
+                        st.markdown('</div>', unsafe_allow_html=True)
                     
                     st.write("---")
                     
@@ -617,20 +685,53 @@ if sheet_conn is not None:
                     
                     st.write("---")
                     
-                    st.markdown("**Extrato Detalhado do Mês de Competência**")
-                    df_mes_tabela = df_mes.drop_duplicates(subset=['Data', 'Descricao', 'Valor', 'Categoria', 'Forma_Pagamento', 'Parcela_Atual'])
+                    st.markdown("### 📝 Extrato Detalhado do Mês de Competência")
                     
+                    df_mes_tabela = df_mes.drop_duplicates(subset=['Data', 'Descricao', 'Valor', 'Categoria', 'Forma_Pagamento', 'Parcela_Atual'])
                     df_mes_exibe = df_mes_tabela[['Data_Exibicao', 'Descricao', 'Valor', 'Parcela_Atual', 'Categoria', 'Responsavel', 'Forma_Pagamento', 'Tipo']].copy()
                     df_mes_exibe.rename(columns={'Data_Exibicao': 'Data', 'Valor': 'Valor Total (R$)'}, inplace=True)
                     
+                    # Seção de Filtros dinâmicos e inteligentes para o extrato
+                    st.markdown("##### 🔍 Filtros Rápidos do Extrato")
+                    f_col1, f_col2, f_col3 = st.columns(3)
+                    with f_col1:
+                        filtro_cat = st.multiselect(
+                            "Filtrar por Categoria:",
+                            options=sorted(list(df_mes_exibe['Categoria'].dropna().unique())),
+                            placeholder="Todas as categorias"
+                        )
+                    with f_col2:
+                        filtro_resp = st.multiselect(
+                            "Filtrar por Quem:",
+                            options=sorted(list(df_mes_exibe['Responsavel'].dropna().unique())),
+                            placeholder="Todos"
+                        )
+                    with f_col3:
+                        filtro_pagto = st.multiselect(
+                            "Filtrar por Forma de Pagamento:",
+                            options=sorted(list(df_mes_exibe['Forma_Pagamento'].dropna().unique())),
+                            placeholder="Todas as formas"
+                        )
+                    
+                    # Aplicação combinada de filtros no DataFrame
+                    df_filtrado = df_mes_exibe.copy()
+                    if filtro_cat:
+                        df_filtrado = df_filtrado[df_filtrado['Categoria'].isin(filtro_cat)]
+                    if filtro_resp:
+                        df_filtrado = df_filtrado[df_filtrado['Responsavel'].isin(filtro_resp)]
+                    if filtro_pagto:
+                        df_filtrado = df_filtrado[df_filtrado['Forma_Pagamento'].isin(filtro_pagto)]
+                    
+                    # Formatação de valores apenas no momento de exibição final
                     def formatar_valor_tabela(val):
                         f = tratar_entrada_numerica(val)
                         return formatar_brl(f)
-                    df_mes_exibe['Valor Total (R$)'] = df_mes_exibe['Valor Total (R$)'].apply(formatar_valor_tabela)
+                        
+                    df_filtrado_exibe = df_filtrado.copy()
+                    df_filtrado_exibe['Valor Total (R$)'] = df_filtrado_exibe['Valor Total (R$)'].apply(formatar_valor_tabela)
                     
-                    st.dataframe(df_mes_exibe, use_container_width=True)
+                    st.dataframe(df_filtrado_exibe, use_container_width=True)
                     
-                    # HISTÓRICO DE CONSUMO DE UTILITÁRIOS (Luz / Água / Gás)
                     st.write("---")
                     st.markdown("### 📈 Histórico de Contas de Consumo (Luz / Água / Gás)")
                     st.markdown("Acompanhe o consumo das principais utilidades domésticas ao longo dos meses para monitorar o orçamento.")
@@ -770,7 +871,7 @@ if sheet_conn is not None:
                         
                         st.markdown(f"📍 **Editando Linha {linha_planilha_real} da planilha:**")
                         
-                        # FORMULÁRIO DE EDIÇÃO CORRIGIDO COM CAMPOS SEGUROS
+                        # FORMULÁRIO DE EDIÇÃO CORRIGIDO COM CAMPOS SEGUROS E PERSONALIZADOS
                         with st.form("form_edicao"):
                             e_col1, e_col2 = st.columns(2)
                             with e_col1:
@@ -783,22 +884,29 @@ if sheet_conn is not None:
                                     index=["Gasto Variável", "Gasto Fixo", "Entrada", "Assinatura"].index(item_selecionado['Tipo'])
                                 )
                             with e_col2:
-                                if e_tipo == "Gasto Fixo":
-                                    e_lista_cats = ["Luz", "Água", "Internet", "Telefone", "Condomínio", "Aluguel", "Plano de Saúde", "Outros Fixos"]
-                                elif e_tipo == "Gasto Variável":
-                                    e_lista_cats = ["Refeição", "Supermercado", "Abastecimento", "Shopping", "Farmácia", "Lazer", "Viagem", "Presentes", "Outros Variáveis"]
-                                elif e_tipo == "Assinatura":
-                                    e_lista_cats = ["Streaming (Netflix/Spotify)", "Academia", "Clube de Assinatura", "Software/App", "Outras Assinaturas"]
-                                else: 
-                                    e_lista_cats = ["Salário", "Rendimento", "Pix Recebido", "Outras Entradas"]
+                                # Carrega as categorias de edição dinamicamente com suporte à criação
+                                e_lista_cats = obter_categorias_por_tipo(e_tipo, dados_brutos)
                                 
-                                idx_cat_edicao = e_lista_cats.index(item_selecionado['Categoria']) if item_selecionado['Categoria'] in e_lista_cats else 0
-                                e_cat = st.selectbox("Nova Categoria", e_lista_cats, index=idx_cat_edicao)
+                                # Fallback seguro caso o item possua categoria customizada não listada inicialmente
+                                cat_original = item_selecionado['Categoria']
+                                if cat_original not in e_lista_cats:
+                                    e_lista_cats.insert(0, cat_original)
+                                    
+                                if "Outra (Criar Nova...)" in e_lista_cats:
+                                    e_lista_cats.remove("Outra (Criar Nova...)")
+                                e_lista_cats.append("Outra (Criar Nova...)")
+                                
+                                idx_cat_edicao = e_lista_cats.index(cat_original) if cat_original in e_lista_cats else 0
+                                e_cat_sel = st.selectbox("Nova Categoria", e_lista_cats, index=idx_cat_edicao)
+                                
+                                e_nova_categoria = ""
+                                if e_cat_sel == "Outra (Criar Nova...)":
+                                    e_nova_categoria = st.text_input("Nome da nova Categoria (Edição):", placeholder="Digite a nova categoria")
                                 
                                 e_resp = st.multiselect(
                                     "Novos Responsáveis", 
-                                    ["Jonathan", "Bruna", "Alice", "Casa", "Gatos"],
-                                    default=resp_item_lista
+                                    ["Jonathan", "Casa", "Gatos"],
+                                    default=[r for r in resp_item_lista if r in ["Jonathan", "Casa", "Gatos"]]
                                 )
                                 
                                 e_forma = st.selectbox(
@@ -826,6 +934,15 @@ if sheet_conn is not None:
                             
                             if btn_atualizar:
                                 val_novo_float = tratar_entrada_numerica(e_valor_texto)
+                                
+                                e_cat_final = e_cat_sel
+                                if e_cat_sel == "Outra (Criar Nova...)":
+                                    if not e_nova_categoria.strip():
+                                        st.error("❌ **Erro:** Digite um nome para a nova categoria personalizada na edição!")
+                                        st.stop()
+                                    else:
+                                        e_cat_final = e_nova_categoria.strip().title()
+                                
                                 if not e_resp:
                                     st.error("Selecione pelo menos um responsável.")
                                 elif e_desc and val_novo_float > 0:
@@ -833,7 +950,7 @@ if sheet_conn is not None:
                                     valor_ed_gravar = f"{val_novo_float:.2f}".replace(".", ",")
                                     
                                     linha_atualizada = [
-                                        str(e_data), e_desc, valor_ed_gravar, e_cat, e_tipo, 
+                                        str(e_data), e_desc, valor_ed_gravar, e_cat_final, e_tipo, 
                                         resp_ed_salvar, e_forma, e_parcelado, int(e_tot_parc)
                                     ]
                                     try:
@@ -860,3 +977,4 @@ if sheet_conn is not None:
                     st.info("A planilha está vazia.")
 else:
     st.info("Aguardando os primeiros dados da planilha para renderizar os gráficos.")
+```
